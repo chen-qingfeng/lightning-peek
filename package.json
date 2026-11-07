@@ -1,0 +1,19 @@
+{
+  "name": "lightning-peek",
+  "private": true,
+  "version": "0.1.1",
+  "description": "An open-source DWG/DXF drawing viewer focused on quick, straightforward viewing.",
+  "license": "GPL-3.0-or-later",
+  "repository": "github:chen-qingfeng/lightning-peek",
+  "scripts": {
+    "start": "electron app",
+    "test": "node --test test/*.test.mjs",
+    "pack:win": "bash build/pack-win.sh"
+  },
+  "devDependencies": {
+    "electron": "33.2.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

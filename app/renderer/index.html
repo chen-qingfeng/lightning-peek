@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' app: data: blob:; script-src 'self' app: 'wasm-unsafe-eval'; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: data: blob:; worker-src 'self' app: blob:">
+<title>闪电看图</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="toolbar"></header>
+  <nav id="doctabs"></nav>
+  <main id="main">
+    <aside id="side" class="hidden">
+      <div class="side-head"><span id="side-title"></span><button class="x" id="side-close" title="关闭面板">×</button></div>
+      <div id="side-body"></div>
+    </aside>
+    <section id="stage">
+      <canvas id="cv"></canvas>
+      <div id="empty">
+        <div class="logo">
+          <svg viewBox="0 0 64 64" width="72" height="72"><rect x="4" y="4" width="56" height="56" rx="14" fill="#1d2a3a"/><path d="M36 8 L18 36 H30 L26 56 L46 26 H34 Z" fill="#ffc531"/></svg>
+          <div><h1>闪电看图</h1><p>DWG / DXF 图纸 · 打开快、测得准</p></div>
+        </div>
+        <button id="empty-open" class="primary">打开图纸</button>
+        <p class="hint">也可以把图纸文件直接拖进窗口</p>
+        <div id="recent-list"></div>
+      </div>
+      <div id="busy" class="hidden"><div class="spin"></div><span id="busy-text">正在打开…</span></div>
+      <div id="tooltip" class="hidden"></div>
+      <div id="toast" class="hidden"></div>
+    </section>
+  </main>
+  <nav id="spacetabs"></nav>
+  <footer id="status">
+    <span id="st-coord">X: —  Y: —</span>
+    <span id="st-tool"></span>
+    <span class="grow"></span>
+    <button id="st-snap" class="chip on" title="对象捕捉（F3）">捕捉</button>
+    <button id="st-ortho" class="chip" title="正交（F8）">正交</button>
+    <span id="st-scale" title="测量比例"></span>
+    <span id="st-info"></span>
+  </footer>
+</div>
+<div id="modal" class="hidden"><div class="box"><h3 id="m-title"></h3><div id="m-body"></div><div class="btns"><button id="m-cancel">取消</button><button id="m-ok" class="primary">确定</button></div></div></div>
+<div id="menu" class="hidden"></div>
+<input type="file" id="file-input" accept=".dwg,.dxf" multiple hidden>
+<script type="module" src="app.js"></script>
+</body>
+</html>

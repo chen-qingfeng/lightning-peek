@@ -1,0 +1,9 @@
+{
+  "name": "lightning-peek",
+  "productName": "闪电看图",
+  "version": "0.1.1",
+  "description": "Lightning Peek: an open-source DWG/DXF drawing viewer focused on quick, straightforward viewing.",
+  "main": "main.js",
+  "author": "chen-qingfeng",
+  "license": "GPL-3.0-or-later"
+}

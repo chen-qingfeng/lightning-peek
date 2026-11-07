@@ -1,0 +1,157 @@
+<p align="center">
+  <img src="app/icon.png" width="96" height="96" alt="闪电看图图标">
+</p>
+
+<h1 align="center">闪电看图 · Lightning Peek</h1>
+
+<p align="center">
+  轻量的 CAD 图纸查看工具：打开 DWG / DXF，看图、查图、粗核量。<br>
+  <a href="README.md">English</a> · <b>简体中文</b>
+</p>
+
+<p align="center"><b>当前版本：v0.1.1 预览版</b>（Windows 10 / 11，64 位）</p>
+
+面向建筑、市政、钢构、古建一线的总工、施工员、造价人员、资料员、甲方及班组人员。打开图纸的人，大多不是为了画图，而是为了**看、查、统计、核对**。闪电看图只做这一段：不用安装 CAD，把图纸打开，把里面的东西找出来、量出来、比出来。
+
+![闪电看图打开泵房平面图，左侧为图层面板](docs/images/overview-zh.png)
+
+## 下载
+
+👉 [从 Releases 下载 Windows 绿色版](https://github.com/chen-qingfeng/lightning-peek/releases)
+
+这是预览版，只用有限的图纸检验过（见[支持格式](#支持格式与已知限制)）。遇到打不开或显示不对的图纸，欢迎[反馈](https://github.com/chen-qingfeng/lightning-peek/issues/new/choose)。暂不提供 macOS 和 Linux 安装包。
+
+## 主要功能
+
+- **打开图纸**：拖进窗口即可打开 DWG / DXF，显示图层、布局、图块、填充、标注和中英文文字。图纸在后台解析，界面不会卡住。
+- **查图**：图层开关、搜索、隔离（只看某一层）；全文查找文字（含标注文字），可限定在框选范围内，结果逐条定位。
+- **粗核量**：长度、连续线、框选范围内线条总长；点选封闭图形或填充直接得到面积（自动扣除孤岛）；按图块名统计数量并框出位置。结果按分类汇总，导出 Excel。
+- **新旧图对比**：逐个图元比对，分出新增、删除、文字修改，统计相同之处和不同之处，可叠加、左右并排、卷帘查看，导出变更清单。
+- **批注不动原图**：文字、云线、箭头、编号等批注保存在图纸旁的小文件里，可以发给同事。
+
+![测量长度、点选面积和统计图块数量](docs/images/measure-zh.png)
+
+![两版图纸对比：删除、新增和修改的图元](docs/images/compare-zh.png)
+
+## 这不是什么
+
+| 不做 | 原因 |
+| --- | --- |
+| PDF、图片（JPG / PNG 等） | 只为 DWG/DXF 优化，不为兼容更多格式增加体积 |
+| CAD 绘图与编辑 | 是查看器，不是编辑器，不与 AutoCAD 竞争 |
+| 重型 BIM / 三维建模 | 坚持二维轻量路线 |
+| 精确算量 / 替代专业造价软件 | 定位是快速粗核量，不替代广联达、斯维尔等专业软件 |
+| 修改原始图纸 | 全程只读；改文字只能另存为新的 DXF |
+
+与同系列项目「迅速看图」分工：闪电看图负责轻量打开、粗提量、图纸核查；迅速看图负责精细建模、精确算量、对接 CASS 与土方等专业提量方向。
+
+> 测量结果用于快速查看和粗略核量，依赖图纸绘制精度与比例设置，不能替代正式的工程量计算。
+
+## 解决什么问题
+
+| 痛点 | v0.1.1 能做的 |
+| --- | --- |
+| 为看一眼图要启动几百 MB 的 CAD | 免安装绿色版，双击打开 |
+| 图层混乱，分不清构件归属 | 图层开关、搜索、隔离 |
+| 文字成堆，看不清也找不到 | 全文查找，逐条定位，可限定范围 |
+| 管线、检查井、基础密密麻麻，人工翻找 | 按图块名统计数量并框出位置；按文字查找 |
+| 长度、面积、个数靠手工框选，易漏易重 | 框选总长、点选面积、图块计数，结果汇总导出 Excel |
+| 设计变更后新旧图对比靠肉眼 | 图纸对比，列出每一处差异 |
+| 资料员、甲方、班组不愿装 CAD | 免安装，界面支持中文和英文 |
+
+图层语义归类、图纸校核、自然语言查询等更多规划见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+
+## 安装与首次使用
+
+1. 从 [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) 下载 `LightningPeek-0.1.1-win-x64.zip`，解压到任意位置，例如 `D:\Tools\LightningPeek`。
+2. 双击 `LightningPeek.exe`。不需要安装，也不需要管理员权限。
+   预览版没有代码签名，Windows SmartScreen 可能提示「未知发布者」。只有确认是从本仓库 Releases 下载的，才点「更多信息 → 仍要运行」。
+3. 点「打开」，或把 `.dwg` / `.dxf` 文件拖进窗口。
+4. 可选：运行 `add-context-menu.bat`，以后在图纸上点右键就有「用闪电看图打开」；`remove-context-menu.bat` 可移除。
+
+界面语言跟随 Windows 显示语言（中文或英文），也可以在「帮助 → 界面语言」里切换。
+
+## 常用操作
+
+| 操作 | 方法 |
+| --- | --- |
+| 缩放 | 鼠标滚轮（以光标为中心） |
+| 平移 | 按住左键或中键拖动 |
+| 全图 | `Home`，或双击中键 |
+| 窗口缩放 | `W`，再拖出矩形 |
+| 结束连续测量、面积 | 右键或 `Enter` |
+| 退出当前工具 | `Esc` |
+| 对象捕捉 / 正交 | `F3` / `F8` |
+| 撤销 | `Ctrl+Z` |
+| 打开 · 查找 · 打印 | `Ctrl+O` · `Ctrl+F` · `Ctrl+P` |
+| 移动 / 复制标注 | 不选工具时拖动它；按住 `Ctrl` 拖动为复制 |
+
+工具快捷键（默认）：`1` 长度 · `2` 连续 · `3` 面积 · `4` 点选面积 · `5` 角度 · `6` 半径 · `7` 坐标 · `8` 框选总长 · `9` 数量统计 · `T` 文字批注 · `Y` 云线 · `A` 箭头 · `R` 矩形框 · `L` 画线 · `N` 编号 · `E` 删除标记 · `B` 表格提取 · `X` 改文字 · `C` 图纸分割 · `S` 测量统计 · `G` 图层。都可以在「帮助」里修改。
+
+## 支持格式与已知限制
+
+| 格式 | 情况 |
+| --- | --- |
+| DWG | 通过 [LibreDWG](https://www.gnu.org/software/libredwg/) 读取。用 AutoCAD 2007 格式（AC1021）的图纸测试过。其他版本取决于 LibreDWG，可能打不开或缺少图元。 |
+| DXF（文本格式） | 直接读取。测试过 R12 和 2007 版 DXF，UTF-8 与 GBK 编码。 |
+| DXF（二进制） | 不支持。 |
+| 导出 | PNG、PDF（A3）、Excel（测量结果、查找结果、表格、对比报告）、DXF（含文字修改的副本）。不能写 DWG。 |
+
+v0.1.1 的已知限制：
+
+- SHX 字体用系统字体（仿宋、宋体等）代替，文字宽度可能与 AutoCAD 略有差别。
+- 天正等专业软件的自定义对象（墙、门窗等）不显示；导出为普通图元的「T3」格式图纸可以正常显示。
+- 不显示外部参照、光栅图片、OLE 对象、遮罩、三维实体、面域和多重引线。
+- 不显示线宽，复杂线型按简单虚线绘制。
+- 布局视口能显示模型内容，但不支持视口单独冻结图层。
+- 打开速度只在一张 380 KB 的图纸上测过（见 [docs/FORMATS.md](docs/FORMATS.md)），还没有在 Windows 真机上做系统的性能测试。
+
+完整的图元支持清单见 [docs/FORMATS.md](docs/FORMATS.md)。
+
+## 隐私与文件
+
+- 闪电看图不联网，不收集任何数据。
+- 不会修改原图纸。改文字只会写进你另存的新 DXF 文件。
+- 添加测量或批注后，会保存在图纸旁的 `图纸名.lpeek.json`。
+- 设置、最近打开记录和浏览器缓存保存在 `LightningPeek.exe` 旁的 `data` 文件夹。
+- 导出 PDF 和打印时会在系统临时文件夹生成临时页面，用完即删。
+
+详见 [docs/PRIVACY.md](docs/PRIVACY.md)。
+
+## 从源码构建
+
+需要：Node.js 20+、带 Pillow 的 Python 3、`curl`、`unzip`、`zip`、`bash`（Linux 或 WSL；macOS 需另装 GNU coreutils）。
+
+```sh
+git clone https://github.com/chen-qingfeng/lightning-peek.git
+cd lightning-peek
+npm install          # 安装开发用的 Electron
+npm start            # 从源码运行
+npm test             # 单元测试（无额外依赖）
+npm run pack:win     # 生成 dist/LightningPeek-<版本>-win-x64.zip
+```
+
+打包过程和目录结构见 [docs/BUILDING.md](docs/BUILDING.md)。
+
+## 路线图
+
+近期：外部参照、安装程序与代码签名、Windows 真机性能测试、线宽显示、更多 DWG 版本的兼容性测试。
+之后：图层语义归类、图纸校核（标注冲突、缺失标注、标高矛盾）、可选的 AI 辅助（自然语言查询、构件识别，默认关闭）。
+
+完整规划与状态见 [docs/ROADMAP.md](docs/ROADMAP.md)，版本变化见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 反馈与参与
+
+- 报告问题、打不开的图纸：[提交 Issue](https://github.com/chen-qingfeng/lightning-peek/issues/new/choose)。请不要上传含保密信息的图纸。
+- 欢迎提交 Pull Request，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 许可证与致谢
+
+闪电看图是自由软件，采用 [GNU 通用公共许可证 第 3 版或更高版本](LICENSE)。
+
+依赖的开源项目：
+
+- [LibreDWG](https://www.gnu.org/software/libredwg/)（GPL-3.0-or-later），以及 mlightcad 的 WebAssembly 版本 [libredwg-web](https://github.com/mlightcad/libredwg-web)（GPL-3.0），用于读取 DWG。
+- [Electron](https://www.electronjs.org/)（MIT）和 Chromium（多种开源许可，随包附带 `LICENSES.chromium.html`）。
+
+详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。`docs/samples` 里的示例图纸为本项目自绘。

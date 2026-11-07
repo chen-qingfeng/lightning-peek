@@ -1,0 +1,39 @@
+name: Bug report / 问题报告
+description: Something does not work, or a drawing does not open or looks wrong. 功能出错、图纸打不开或显示不对。
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not attach drawings that contain confidential or personal information.
+        请不要上传含保密或个人信息的图纸。
+  - type: input
+    id: version
+    attributes:
+      label: Lightning Peek version / 版本
+      placeholder: "0.1.0"
+    validations: { required: true }
+  - type: input
+    id: os
+    attributes:
+      label: Windows version / Windows 版本
+      placeholder: "Windows 11 23H2, 64-bit"
+    validations: { required: true }
+  - type: input
+    id: drawing
+    attributes:
+      label: Drawing format and version / 图纸格式与版本
+      description: Shown in the status bar after opening, e.g. "AutoCAD 2007". 打开后状态栏会显示，例如「AutoCAD 2007」。
+      placeholder: "DWG, AutoCAD 2013"
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do? / 操作步骤
+      placeholder: "1. Open ...  2. Click ...  3. ..."
+    validations: { required: true }
+  - type: textarea
+    id: result
+    attributes:
+      label: What happened, and what did you expect? / 实际结果与期望结果
+      description: Screenshots help a lot. 附截图最有帮助。
+    validations: { required: true }

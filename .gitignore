@@ -1,0 +1,7 @@
+node_modules/
+dist/
+build/cache/
+data-dev/
+*.lpeek.json
+.DS_Store
+Thumbs.db
