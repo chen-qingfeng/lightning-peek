@@ -21,7 +21,9 @@ Do not attach drawings that contain confidential or personal information. If you
 5. Add or update a test in `test/` when you change parsing or measurement code.
 6. Describe what you changed and how you checked it in the pull request.
 
-By contributing you agree that your contribution is licensed under GPL-3.0-or-later.
+## Contributor License Agreement
+
+Before a pull request can be merged, you need to agree to the [Contributor License Agreement](CLA.md) by ticking the box in the pull request template. You keep the copyright in your work; the agreement lets the maintainer also offer Lightning Peek under other terms, such as a future commercial edition. Code released in this repository stays available under GPL-3.0-or-later.
 
 ---
 
@@ -31,4 +33,4 @@ By contributing you agree that your contribution is licensed under GPL-3.0-or-la
 
 - **报告问题**：请使用 Issue 模板，写明版本、Windows 版本、图纸格式与版本（打开后状态栏会显示，如「AutoCAD 2007」）、期望结果和实际结果，最好附截图。请不要上传含保密或个人信息的图纸。
 - **修改代码**：`npm install` 后用 `npm start` 运行、`npm test` 测试；保持现有结构（原生 JS 模块，不引入打包工具，新增运行时依赖请先在 Issue 讨论）；界面文字用 `tr('中文原文')`，并在 `app/renderer/core/i18n.js` 补英文；改动解析或测量代码时请补测试。
-- 提交即表示同意以 GPL-3.0-or-later 许可发布你的贡献。
+- **贡献者许可协议**：Pull Request 合并前需同意 [CLA.md](CLA.md)（在 PR 模板中勾选即可）。你的贡献版权仍归你所有；协议允许维护者以其他条款（例如将来的商业版本）提供闪电看图。已在本仓库发布的代码继续以 GPL-3.0-or-later 开源。
