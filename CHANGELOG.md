@@ -2,7 +2,18 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
-## [0.1.1] – Preview – unreleased
+## [0.1.2] – Preview – unreleased
+
+### Added
+- Embedded OLE objects (OLE2FRAME) are shown, for example Excel quantity tables pasted into the drawing. They are drawn from the preview Windows stored in the drawing (WMF), on a white background as in AutoCAD.
+- Tools → Embedded: lists the OLE objects of all layouts with their titles, jumps to each one, and saves the embedded Excel workbook as an .xlsx file.
+- Raster images (IMAGE) are drawn as their outline. The picture itself lives in an external file and is still not shown.
+
+### Fixed
+- Layout viewports now show the right part of model space. The view target, twist angle, non-rectangular clipping boundary and per-viewport frozen layers are applied. Before, viewports with a view target were blank.
+- The overall paper viewport of a layout is no longer drawn as a model viewport. Layouts that contain nothing else get no tab.
+
+## [0.1.1] – Preview – 2026-11-07
 
 First public preview. Windows 10/11 x64 portable package only.
 

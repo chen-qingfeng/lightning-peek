@@ -1,5 +1,5 @@
 // 闪电看图 · 后台解析线程
-import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP } from './engine.js';
+import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec } from './engine.js';
 
 let wasm = null;
 async function lib() {
@@ -17,15 +17,61 @@ function dwgToDxf(m, bytes) {
   try {
     const r = m.dwg_read_file(inF);
     const err = r && typeof r.error === 'number' ? r.error : 0;
+    let oles = [];
+    if (r && r.data && err < 128) { try { oles = extractOles(m, r.data); } catch (e) { console.warn('OLE', e); } }
     if (r && r.data && m.dwg_free) { try { m.dwg_free(r.data); } catch (e) { /* ignore */ } }
     if (err >= 128) throw new Error(errText(err));
     const rc = m.dwg_write_dxf(inF, outF);
     if (rc >= 128 || !m.FS.analyzePath(outF).exists) throw new Error(errText(rc || err));
     const out = m.FS.readFile(outF);
-    return { bytes: out, warn: err };
+    return { bytes: out, warn: err, oles };
   } finally {
     try { m.FS.unlink(inF); } catch (e) { /* ignore */ }
     try { m.FS.unlink(outF); } catch (e) { /* ignore */ }
+  }
+}
+// LibreDWG 写 DXF 时会丢掉 OLE2FRAME，这里直接从 DWG 对象里取出数据和位置
+const hex = v => (typeof v === 'bigint' ? v : BigInt(Math.round(Number(v) || 0))).toString(16).toUpperCase();
+function extractOles(m, dwg) {
+  const out = [];
+  const n = m.dwg_get_num_objects(dwg);
+  for (let i = 0; i < n; i++) {
+    const obj = m.dwg_get_object(dwg, i);
+    if (!obj || m.dwg_object_get_fixedtype(obj) !== 74) continue; // 74 = OLE2FRAME
+    const et = m.dwg_object_to_entity_tio(obj);
+    const ent = m.dwg_object_to_entity(obj);
+    const d = m.dwg_entity_ole2frame_get_data(et);
+    const data = d && d.data; if (!data || !data.length) continue;
+    const p1 = m.dwg_dynapi_entity_value(et, 'pt1')?.data, p2 = m.dwg_dynapi_entity_value(et, 'pt2')?.data;
+    if (!p1 || !p2) continue;
+    let mode = 2, owner = '', layer = '';
+    try { mode = m.dwg_object_entity_get_entmode(ent); } catch (e) { /* ignore */ }
+    try { const o = m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
+    try { const l = m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
+    out.push({ data: new Uint8Array(data), p1: [p1.x, p1.y], p2: [p2.x, p2.y], mode, owner, layer });
+  }
+  return out;
+}
+// 把取出的 OLE 对象作为记录放回解析后的图纸：模型空间 / 图纸空间 / 所在的块
+function injectOles(doc, oles) {
+  if (!oles || !oles.length) return;
+  const byHandle = new Map(); for (const [h, nm] of doc.blockRecords) byHandle.set(h, nm);
+  // 有的版本 DXF 输出里已经带了 OLE2FRAME（含 310 数据），按角点去重
+  const key = (x, y) => Math.round(x * 1000) + ',' + Math.round(y * 1000);
+  const have = new Set();
+  const scan = ents => { for (const r of ents) if (r.type === 'OLE2FRAME' && r.has(310)) have.add(key(r.f(10), r.f(20))); };
+  scan(doc.entities); for (const b of doc.blocks.values()) scan(b.ents);
+  for (const o of oles) {
+    if (have.has(key(o.p1[0], o.p1[1]))) continue;
+    const pairs = [[8, doc.layerHandles.get(o.layer) || '0'], [10, o.p1[0]], [20, o.p1[1]], [11, o.p2[0]], [21, o.p2[1]]];
+    const bn = o.mode === 0 ? (byHandle.get(o.owner) || '') : '';
+    if (o.mode === 1) pairs.push([67, 1]);
+    if (bn && !/^\*(MODEL|PAPER)_SPACE/i.test(bn)) {
+      const b = doc.blocks.get(bn.toUpperCase()); if (b) b.ents.push(makeRec('OLE2FRAME', pairs, { _ole: o.data }));
+      continue;
+    }
+    if (bn) pairs.push([330, o.owner]);
+    doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data }));
   }
 }
 function errText(code) {
@@ -50,19 +96,20 @@ function collect(scene, list = []) {
 async function open(id, name, bytes) {
   const t0 = performance.now();
   const lower = name.toLowerCase();
-  let dxfBytes = bytes, warn = 0, version = '';
+  let dxfBytes = bytes, warn = 0, version = '', oles = null;
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
     const m = await lib();
     const r = dwgToDxf(m, bytes);
-    dxfBytes = r.bytes; warn = r.warn; version = magic;
+    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles;
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
   }
   post({ id, progress: '正在解析图元…' });
   const { text, enc } = decodeDxf(dxfBytes);
   const doc = parseDxf(text);
+  injectOles(doc, oles);
   if (!version) { const v = doc.header.$ACADVER; version = v && v[0] ? v[0][1] : 'DXF'; }
   const t1 = performance.now();
   const scene = buildScene(doc);

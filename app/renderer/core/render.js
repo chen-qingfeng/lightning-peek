@@ -38,6 +38,8 @@ export function minv(m) {
   return [m[3] / d, -m[1] / d, -m[2] / d, m[0] / d, (m[2] * m[5] - m[3] * m[4]) / d, (m[1] * m[4] - m[0] * m[5]) / d];
 }
 
+const OLE_FONTS = '"Microsoft YaHei","SimSun","Noto Sans CJK SC","PingFang SC",sans-serif';
+function oleFont(face) { return face && !/[",]/.test(face) ? '"' + face + '",' + OLE_FONTS : OLE_FONTS; }
 const measureCtx = (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(4, 4) : document.createElement('canvas')).getContext('2d');
 
 export class Renderer {
@@ -91,6 +93,71 @@ export class Renderer {
     ctx.setLineDash([]);
     ctx.restore();
     if (this.showText) this.drawTexts(ctx, space.texts, M, viewRect, over, opt);
+    if (space.oles && space.oles.length) this.drawOles(ctx, space.oles, M, viewRect, opt);
+  }
+
+  // OLE 对象（嵌入的 Excel 表格等）：按 Windows 保存的预览图元绘制，底色为白色，和 CAD 里一致
+  drawOles(ctx, oles, M, viewRect, opt = {}) {
+    const [vx0, vy0, vx1, vy1] = viewRect;
+    const dpr = opt.dpr || 1;
+    for (const o of oles) {
+      if (!this.visible(o.layer)) continue;
+      const q = o.quad.map(p => mapply(M, p[0], p[1]));
+      const xs = q.map(p => p[0]), ys = q.map(p => p[1]);
+      if (Math.max(...xs) < vx0 || Math.min(...xs) > vx1 || Math.max(...ys) < vy0 || Math.min(...ys) > vy1) continue;
+      const T = mmul(M, o.L);
+      const sx = Math.hypot(T[0], T[1]), sy = Math.hypot(T[2], T[3]); const sc = Math.sqrt(sx * sy);
+      ctx.save();
+      ctx.globalAlpha = opt.alpha ?? 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.beginPath(); q.forEach((p, i) => (i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]))); ctx.closePath();
+      if (opt.color) { ctx.strokeStyle = opt.color; ctx.lineWidth = dpr; ctx.stroke(); ctx.restore(); continue; }
+      ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.clip();
+      if (Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < 6 * dpr) { ctx.restore(); continue; }
+      ctx.setTransform(T[0], T[1], T[2], T[3], T[4], T[5]);
+      const px = Math.max(1, dpr * 0.9) / sc;
+      let clip = undefined;
+      for (const op of o.pic.ops) {
+        if (op.clip !== clip) {
+          if (clip !== undefined) ctx.restore();
+          ctx.save(); clip = op.clip;
+          if (clip) { ctx.beginPath(); ctx.rect(clip[0], clip[1], clip[2] - clip[0], clip[3] - clip[1]); ctx.clip(); }
+        }
+        if (op.t === 'L') {
+          ctx.strokeStyle = css(op.c); ctx.lineWidth = Math.max(op.w || 0, px); ctx.lineCap = 'butt';
+          ctx.beginPath(); ctx.moveTo(op.p[0], op.p[1]); for (let j = 2; j < op.p.length; j += 2) ctx.lineTo(op.p[j], op.p[j + 1]); ctx.stroke();
+        } else if (op.t === 'F') {
+          ctx.fillStyle = css(op.c);
+          ctx.beginPath(); ctx.moveTo(op.p[0], op.p[1]); for (let j = 2; j < op.p.length; j += 2) ctx.lineTo(op.p[j], op.p[j + 1]); ctx.closePath(); ctx.fill();
+        } else if (op.t === 'T') {
+          const h = Math.abs(op.h) || 12;
+          if (h * sc < 1.6 * dpr) continue;
+          const size = op.h < 0 ? h : h * 0.86; // 正值是字符格高度，含行距
+          ctx.font = (op.ital ? 'italic ' : '') + (op.bold ? 'bold ' : '') + '100px ' + oleFont(op.face);
+          const k = size / 100;
+          if (op._w === undefined) { measureCtx.font = ctx.font; op._w = measureCtx.measureText(op.s).width; }
+          let fx = k; if (op.adv > 0 && op._w > 0) fx = Math.min(k, op.adv / op._w);
+          const ha = (op.al & 6) === 6 ? 0.5 : (op.al & 6) === 2 ? 1 : 0;
+          const va = (op.al & 24) === 24 ? 'alphabetic' : (op.al & 8) ? 'bottom' : 'top';
+          ctx.save();
+          ctx.translate(op.x, op.y);
+          if (op.esc) ctx.rotate(-op.esc * Math.PI / 180);
+          ctx.scale(fx, k);
+          ctx.textBaseline = va;
+          ctx.fillStyle = css(op.c);
+          ctx.fillText(op.s, -op._w * ha, 0);
+          ctx.restore();
+        } else if (op.t === 'I') {
+          if (!op._cv) {
+            const c = typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(op.img.w, op.img.h) : Object.assign(document.createElement('canvas'), { width: op.img.w, height: op.img.h });
+            c.getContext('2d').putImageData(new ImageData(op.img.rgba, op.img.w, op.img.h), 0, 0); op._cv = c;
+          }
+          ctx.drawImage(op._cv, op.x, op.y, op.w, op.h);
+        }
+      }
+      if (clip !== undefined) ctx.restore();
+      ctx.restore();
+    }
   }
 
   drawTexts(ctx, texts, M, viewRect, over, opt = {}) {

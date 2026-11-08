@@ -1,6 +1,14 @@
 // 闪电看图 · 界面语言
 // 中文原文即词条键；英文缺词时退回中文。语言按系统自动选择，可在「帮助」里切换。
 export const EN = {
+ "嵌入表格": "Embedded",
+ "嵌入表格（OLE）": "Embedded tables (OLE)",
+ "对比视图里不显示嵌入表格": "Embedded tables are not shown in compare view",
+ "这张图纸里没有嵌入的 OLE 对象。": "This drawing has no embedded OLE objects.",
+ "共 {0} 个。显示的是保存图纸时 Windows 记录的预览；「另存 Excel」导出的是嵌入的原始表格文件。": '{0} found. The view shows the preview Windows stored when the drawing was saved; "Save Excel" exports the original embedded workbook.',
+ "OLE 对象 {0}": "OLE object {0}",
+ "定位": "Locate",
+ "另存 Excel": "Save Excel",
  "解析线程出错：": "Parser error: ",
  "开始": "Home",
  "打开": "Open",

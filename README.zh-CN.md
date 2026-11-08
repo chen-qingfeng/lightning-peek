@@ -9,7 +9,7 @@
   <a href="README.md">English</a> · <b>简体中文</b>
 </p>
 
-<p align="center"><b>当前版本：v0.1.1 预览版</b>（Windows 10 / 11，64 位）</p>
+<p align="center"><b>当前版本：v0.1.2 预览版</b>（Windows 10 / 11，64 位）</p>
 
 面向建筑、市政、钢构、古建一线的总工、施工员、造价人员、资料员、甲方及班组人员。打开图纸的人，大多不是为了画图，而是为了**看、查、统计、核对**。闪电看图只做这一段：不用安装 CAD，把图纸打开，把里面的东西找出来、量出来、比出来。
 
@@ -49,7 +49,7 @@
 
 ## 解决什么问题
 
-| 痛点 | v0.1.1 能做的 |
+| 痛点 | v0.1.2 能做的 |
 | --- | --- |
 | 为看一眼图要启动几百 MB 的 CAD | 免安装绿色版，双击打开 |
 | 图层混乱，分不清构件归属 | 图层开关、搜索、隔离 |
@@ -63,7 +63,7 @@
 
 ## 安装与首次使用
 
-1. 从 [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) 下载 `LightningPeek-0.1.1-win-x64.zip`，解压到任意位置，例如 `D:\Tools\LightningPeek`。
+1. 从 [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) 下载 `LightningPeek-0.1.2-win-x64.zip`，解压到任意位置，例如 `D:\Tools\LightningPeek`。
 2. 双击 `LightningPeek.exe`。不需要安装，也不需要管理员权限。
    预览版没有代码签名，Windows SmartScreen 可能提示「未知发布者」。只有确认是从本仓库 Releases 下载的，才点「更多信息 → 仍要运行」。
 3. 点「打开」，或把 `.dwg` / `.dxf` 文件拖进窗口。
@@ -97,13 +97,13 @@
 | DXF（二进制） | 不支持。 |
 | 导出 | PNG、PDF（A3）、Excel（测量结果、查找结果、表格、对比报告）、DXF（含文字修改的副本）。不能写 DWG。 |
 
-v0.1.1 的已知限制：
+v0.1.2 的已知限制：
 
 - SHX 字体用系统字体（仿宋、宋体等）代替，文字宽度可能与 AutoCAD 略有差别。
 - 天正等专业软件的自定义对象（墙、门窗等）不显示；导出为普通图元的「T3」格式图纸可以正常显示。
-- 不显示外部参照、光栅图片、OLE 对象、遮罩、三维实体、面域和多重引线。
+- 不显示外部参照、遮罩、三维实体、面域和多重引线。光栅图片只画外框。
+- OLE 对象按图纸里保存的预览图显示；图纸没存预览的对象只画外框。
 - 不显示线宽，复杂线型按简单虚线绘制。
-- 布局视口能显示模型内容，但不支持视口单独冻结图层。
 - 打开速度只在一张 380 KB 的图纸上测过（见 [docs/FORMATS.md](docs/FORMATS.md)），还没有在 Windows 真机上做系统的性能测试。
 
 完整的图元支持清单见 [docs/FORMATS.md](docs/FORMATS.md)。

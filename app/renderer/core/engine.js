@@ -1,4 +1,5 @@
 // 闪电看图 · 几何引擎
+import { parseOleFrame } from './ole.js';
 // DXF 文本 → 文档结构 → 场景（按样式合批的绘图指令、文字、捕捉点、圆弧表）
 // 所有输出坐标都是“局部坐标”= 世界坐标 − 原点，避免大坐标在画布里丢精度。
 
@@ -37,6 +38,12 @@ export function decodeDxf(bytes) {
   const r = decodeDxfInner(bytes);
   return typeof r === 'string' ? { text: r, enc: 'utf-8' } : r;
 }
+const CP_MAP = { ANSI_936: 'gbk', ANSI_950: 'big5', ANSI_932: 'shift_jis', ANSI_949: 'euc-kr', ANSI_1252: 'windows-1252', ANSI_1251: 'windows-1251', ANSI_1250: 'windows-1250' };
+// 图纸的 ANSI 代码页（OLE 预览里的文字按它解码）
+function ansiOf(doc) {
+  const v = doc.header.$DWGCODEPAGE; const cp = v && v[0] ? String(v[0][1]).toUpperCase() : '';
+  return CP_MAP[cp] || 'gbk';
+}
 function decodeDxfInner(bytes) {
   try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { /* 含非法 UTF-8 字节 */ }
   const head = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 200000)));
@@ -53,8 +60,7 @@ function decodeDxfInner(bytes) {
   }
   const m = head.match(/\$DWGCODEPAGE\s*\r?\n\s*3\s*\r?\n([^\r\n]+)/);
   const cp = (m ? m[1].trim() : 'ANSI_936').toUpperCase();
-  const map = { ANSI_936: 'gbk', ANSI_950: 'big5', ANSI_932: 'shift_jis', ANSI_949: 'euc-kr', ANSI_1252: 'windows-1252', ANSI_1251: 'windows-1251', ANSI_1250: 'windows-1250' };
-  const enc = map[cp] || 'gbk';
+  const enc = CP_MAP[cp] || 'gbk';
   return { text: new TextDecoder(enc).decode(bytes), enc };
 }
 // 把文本按旧代码页编码回字节（R2007 以前的 DXF 另存时用）
@@ -114,9 +120,16 @@ class Rec {
   all(code) { const r = []; for (let i = 0; i < this.c.length; i++) if (this.c[i] === code) r.push(this.v[i]); return r; }
 }
 
+// 构造一条记录（用于把 DWG 里 DXF 输出丢失的对象补回去，例如 OLE2FRAME）
+export function makeRec(type, pairs, extra) {
+  const r = new Rec(type, pairs.map(p => p[0]), pairs.map(p => String(p[1])));
+  if (extra) Object.assign(r, extra);
+  return r;
+}
+
 export function parseDxf(text) {
   const { codes, vals, n } = tokenize(text);
-  const doc = { header: {}, layers: new Map(), ltypes: new Map(), styles: new Map(), blocks: new Map(), blockRecords: new Map(), entities: [], layouts: [] };
+  const doc = { header: {}, layers: new Map(), ltypes: new Map(), styles: new Map(), blocks: new Map(), blockRecords: new Map(), layerHandles: new Map(), entities: [], layouts: [] };
   let p = 0;
   const readRec = () => {
     const type = vals[p].trim(); p++;
@@ -143,6 +156,7 @@ export function parseDxf(text) {
           if (r.type === 'LAYER') {
             const nm = r.s(2); const col = r.i(62, 7);
             const tc = r.has(420) ? r.i(420) & 0xffffff : null;
+            if (r.has(5)) doc.layerHandles.set(r.s(5).toUpperCase(), nm);
             doc.layers.set(nm.toUpperCase(), { name: nm, color: tc != null ? tc : aciToRgb(Math.abs(col) || 7), off: col < 0, frozen: (r.i(70) & 1) !== 0, ltype: r.s(6, 'CONTINUOUS'), plot: r.i(290, 1) });
           } else if (r.type === 'LTYPE') {
             doc.ltypes.set(r.s(2).toUpperCase(), { name: r.s(2), dashes: r.all(49).map(Number).filter(Number.isFinite), total: r.f(40) });
@@ -278,6 +292,37 @@ export const FONT_FAMILIES = [
 // 1 M x y | 2 L x y | 3 A cx cy r a0 a1 ccw | 4 E cx cy rx ry rot a0 a1 ccw | 5 Z
 export const OP = { M: 1, L: 2, A: 3, E: 4, Z: 5 };
 
+// 视口的非矩形裁剪边界：按句柄找到图纸空间里的多段线/圆，取成多边形（图纸坐标）
+function resolveClips(ents, vps) {
+  const want = new Set(vps.filter(v => v.clipH).map(v => v.clipH));
+  if (!want.size) return;
+  const got = new Map();
+  for (let i = 0; i < ents.length; i++) {
+    const r = ents[i]; const h = r.s(5).toUpperCase();
+    if (!want.has(h)) continue;
+    let poly = null;
+    if (r.type === 'LWPOLYLINE') {
+      const verts = []; let cur = null;
+      for (let j = 0; j < r.c.length; j++) {
+        const c = r.c[j];
+        if (c === 10) { cur = [parseFloat(r.v[j]), 0, 0]; verts.push(cur); }
+        else if (c === 20 && cur) cur[1] = parseFloat(r.v[j]);
+        else if (c === 42 && cur) cur[2] = parseFloat(r.v[j]);
+      }
+      poly = polyOps(I2, verts, true).flat;
+    } else if (r.type === 'POLYLINE') {
+      const verts = [];
+      for (let j = i + 1; j < ents.length && ents[j].type === 'VERTEX'; j++) verts.push([ents[j].f(10), ents[j].f(20), ents[j].f(42)]);
+      poly = polyOps(I2, verts, true).flat;
+    } else if (r.type === 'CIRCLE') {
+      poly = arcPoints(r.f(10), r.f(20), r.f(40), 0, Math.PI * 2, 96);
+    }
+    if (poly && poly.length > 2) got.set(h, poly);
+  }
+  for (const v of vps) if (v.clipH && got.has(v.clipH)) v.clip = got.get(v.clipH);
+}
+const I2 = [1, 0, 0, 1, 0, 0];
+
 // ---------- 场景构建 ----------
 export function buildScene(doc, opts = {}) {
   const ltscale = hdrNum(doc, '$LTSCALE', 40, 1) || 1;
@@ -336,11 +381,13 @@ export function buildScene(doc, opts = {}) {
     const sink = opts.sinkFactory ? opts.sinkFactory(sp) : new SceneSink();
     const o = sp.paper ? [0, 0] : [ox, oy];
     const root = [1, 0, 0, 1, -o[0], -o[1]];
-    const ctx = { doc, sink, ltscale, stats, viewports: [], depth: 0 };
+    const ctx = { doc, sink, ltscale, stats, viewports: [], oles: [], depth: 0 };
     walk(ctx, sp.ents, root, { layer: '0', color: FG, ltype: 'CONTINUOUS' });
     const res = sink.finish();
     res.key = sp.key; res.name = sp.name; res.paper = sp.paper; res.origin = o;
     res.viewports = ctx.viewports;
+    if (sp.paper) resolveClips(sp.ents, res.viewports);
+    res.oles = ctx.oles;
     out.push(res);
   }
   const layers = [...doc.layers.values()].map(l => ({ name: l.name, color: l.color, on: !l.off && !l.frozen }));
@@ -645,10 +692,52 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
     }
     case 'HATCH': emitHatch(ctx, r, om(), st()); return 0;
     case 'VIEWPORT': {
-      if (ctx.depth === 0 && r.i(69, 2) !== 1 && !(r.i(90) & 131072)) {
+      if (ctx.depth === 0 && !(r.i(90) & 131072)) {
         const c = ap(m, r.f(10), r.f(20));
-        ctx.viewports.push({ cx: c[0], cy: c[1], w: r.f(40), h: r.f(41), vcx: r.f(12), vcy: r.f(22), vh: r.f(45), twist: r.f(51) * Math.PI / 180, on: !(r.i(90) & 131072) });
+        const vp = { cx: c[0], cy: c[1], w: r.f(40), h: r.f(41), vcx: r.f(12), vcy: r.f(22), tx: r.f(17), ty: r.f(27), vh: r.f(45), twist: r.f(51) * Math.PI / 180,
+          clipH: (r.i(90) & 65536) ? r.s(340).toUpperCase() : '', frozen: r.all(341).map(h => ctx.doc.layerHandles.get(h.trim().toUpperCase())).filter(Boolean), clip: null };
+        // 每个布局的第一个视口是图纸本身的总视口（ID 为 1，或目标点为 0、视图中心等于自身中心），不画模型内容
+        const first = !ctx.vpSeen; ctx.vpSeen = true;
+        const overall = r.i(69, 2) === 1 || (first && !vp.tx && !vp.ty && !r.f(51) && Math.abs(vp.vcx - r.f(10)) < 1e-6 && Math.abs(vp.vcy - r.f(20)) < 1e-6);
+        if (!overall) ctx.viewports.push(vp);
+      } else if (ctx.depth === 0) ctx.vpSeen = true;
+      return 0;
+    }
+    case 'IMAGE': case 'WIPEOUT': {
+      // 光栅图片引用外部文件，图纸里没有像素数据：画出图片外框，提示这里有图片
+      const ux = r.f(11), uy = r.f(21), vx = r.f(12), vy = r.f(22), nu = r.f(13, 1), nv = r.f(23, 1);
+      const x0 = r.f(10), y0 = r.f(20);
+      const P = [[x0, y0], [x0 + ux * nu, y0 + uy * nu], [x0 + ux * nu + vx * nv, y0 + uy * nu + vy * nv], [x0 + vx * nv, y0 + vy * nv]].map(q => ap(m, q[0], q[1]));
+      if (t === 'IMAGE') {
+        S.path(st(), [OP.M, P[0][0], P[0][1], OP.L, P[1][0], P[1][1], OP.L, P[2][0], P[2][1], OP.L, P[3][0], P[3][1], OP.Z], null, 0, t);
+        ctx.stats.skipped['IMAGE'] = (ctx.stats.skipped['IMAGE'] || 0) + 1;
       }
+      return 0;
+    }
+    case 'OLE2FRAME': {
+      let info = r._oleInfo;
+      if (!info) {
+        let data = r._ole;
+        if (!data) { const hex = r.all(310).join('').trim(); if (hex) { data = new Uint8Array(hex.length >> 1); for (let j = 0; j < data.length; j++) data[j] = parseInt(hex.substr(j * 2, 2), 16); } }
+        info = data ? parseOleFrame(data, { enc: ansiOf(ctx.doc) }) : { error: 'nodata' };
+        r._oleInfo = info;
+      }
+      // pt1 = 左上角，pt2 = 右下角（WCS）
+      const x1 = r.f(10), y1 = r.f(20), x2 = r.f(11), y2 = r.f(21);
+      const TL = ap(m, x1, y1), TR = ap(m, x2, y1), BR = ap(m, x2, y2), BL = ap(m, x1, y2);
+      for (const q of [TL, TR, BR, BL]) ctx.sink._bb(q[0], q[1]);
+      const s = st();
+      const pic = info.pic;
+      if (!pic) { // 没有可用的预览：画出外框，让人知道这里有个对象
+        S.path(s, [OP.M, TL[0], TL[1], OP.L, TR[0], TR[1], OP.L, BR[0], BR[1], OP.L, BL[0], BL[1], OP.Z], null, 0, t);
+        ctx.stats.skipped['OLE2FRAME?'] = (ctx.stats.skipped['OLE2FRAME?'] || 0) + 1;
+        return 0;
+      }
+      const [wx, wy, ww, wh] = pic.win;
+      const ax = (TR[0] - TL[0]) / ww, ay = (TR[1] - TL[1]) / ww, bx = (BL[0] - TL[0]) / wh, by = (BL[1] - TL[1]) / wh;
+      const L = [ax, ay, bx, by, TL[0] - ax * wx - bx * wy, TL[1] - ay * wx - by * wy];
+      const bb = [Math.min(TL[0], TR[0], BR[0], BL[0]), Math.min(TL[1], TR[1], BR[1], BL[1]), Math.max(TL[0], TR[0], BR[0], BL[0]), Math.max(TL[1], TR[1], BR[1], BL[1])];
+      ctx.oles.push({ L, pic, layer: s.layer, bb, quad: [TL, TR, BR, BL], pkg: info.pkg, prog: info.progId, idx: ctx.oles.length });
       return 0;
     }
     case 'SEQEND': case 'VERTEX': return 0;

@@ -77,6 +77,7 @@ const IC = {
   line: '<path class="acc" d="M4 19L20 5"/><circle cx="4" cy="19" r="1.5"/><circle cx="20" cy="5" r="1.5"/>',
   num: '<circle class="acc" cx="12" cy="12" r="8"/><path d="M10.5 9.5l2-1.5V16M10.5 16h4"/>',
   table: '<rect x="3.5" y="4.5" width="17" height="15" rx="1"/><path d="M3.5 9.5h17M3.5 14.5h17M10 4.5v15"/><path class="acc" d="M14 12h5"/>',
+  oles: '<rect x="3.5" y="4.5" width="17" height="15" rx="1"/><path d="M3.5 9.5h17M9 9.5v10"/><path class="acc" d="M13 13h5M13 16.5h4"/>',
   edittext: '<path d="M4 6V4.5h10V6M9 4.5V16M7 16h4"/><path class="acc" d="M13 20l1-3.5 6-6 2.5 2.5-6 6z"/>',
   clip: '<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path class="acc" d="M8.5 15.5L18 4M15.5 15.5L6 4"/>',
 };
@@ -97,7 +98,7 @@ const TABS = [
     [['erase', tr('删除标记')], ['undo', tr('撤销'), 'Ctrl+Z'], ['stats', tr('测量统计')]],
   ] },
   { name: tr('工具'), groups: [
-    [['table', tr('表格提取')], ['edittext', tr('改文字')], ['clip', tr('图纸分割')]],
+    [['table', tr('表格提取')], ['oles', tr('嵌入表格')], ['edittext', tr('改文字')], ['clip', tr('图纸分割')]],
     [['compare', tr('图纸对比')], ['find', tr('文字查找')]],
     [['export', tr('导出')], ['print', tr('打印')]],
   ] },
@@ -135,12 +136,12 @@ function refreshToolbar() {
   for (const b of document.querySelectorAll('.tb')) {
     const id = b.dataset.id;
     const needDoc = !['open', 'recent', 'help'].includes(id);
-    const needDrawing = MODAL_TOOLS.has(id) || ['scale', 'stats', 'undo', 'compare'].includes(id);
+    const needDrawing = MODAL_TOOLS.has(id) || ['scale', 'stats', 'undo', 'compare', 'oles'].includes(id);
     b.disabled = (needDoc && !d) || (needDrawing && !draw);
     b.classList.toggle('on', state.tool === id || (state.side && state.side === sideOf(id)) || (id === 'bg' && R.bg === 'white'));
   }
 }
-function sideOf(id) { return { layers: 'layers', stats: 'stats', find: 'find', compare: 'compare', help: 'help' }[id]; }
+function sideOf(id) { return { layers: 'layers', stats: 'stats', find: 'find', compare: 'compare', help: 'help', oles: 'oles' }[id]; }
 
 // ---------------- 命令 ----------------
 async function command(id, e) {
@@ -149,7 +150,7 @@ async function command(id, e) {
     case 'open': return openDialog();
     case 'recent': return recentMenu(e.currentTarget);
     case 'extents': return zoomExtents();
-    case 'layers': case 'stats': case 'find': case 'compare': case 'help': return toggleSide(id);
+    case 'layers': case 'stats': case 'find': case 'compare': case 'help': case 'oles': return toggleSide(id);
     case 'bg': R.bg = R.bg === 'black' ? 'white' : 'black'; state.settings.bg = R.bg; saveSettings(); $('#stage').style.background = R.bg === 'white' ? '#fff' : '#000'; refreshToolbar(); return redraw();
     case 'scale': return scaleDialog();
     case 'undo': return undo();
@@ -357,23 +358,38 @@ function draw() {
   }
   drawOverlays(d, M);
 }
-function drawPaper(d, sp, M, rect) {
-  R.drawSpace(ctx, sp, M, rect, { dpr: DPR });
+function vpMatrix(vp, ms) {
+  // 模型 WCS → DCS：减去视图目标点，再按扭转角旋转；DCS → 图纸：减去视图中心，按比例缩放，平移到视口中心
+  const k = vp.h / vp.vh, c = Math.cos(vp.twist), s = Math.sin(vp.twist);
+  let Mv = [k, 0, 0, k, vp.cx, vp.cy];
+  Mv = mmul(Mv, [1, 0, 0, 1, -vp.vcx, -vp.vcy]);
+  Mv = mmul(Mv, [c, s, -s, c, 0, 0]);
+  return mmul(Mv, [1, 0, 0, 1, ms.origin[0] - (vp.tx || 0), ms.origin[1] - (vp.ty || 0)]);
+}
+function vpLayers(vp, base) {
+  if (!vp.frozen || !vp.frozen.length) return base;
+  const m = new Map(base); for (const n of vp.frozen) m.set(n, false); return m;
+}
+function drawPaper(d, sp, M, rect, c2 = ctx, dpr = DPR) {
   const ms = modelSpace(d);
+  const saved = R.layerOn;
   for (const vp of sp.viewports) {
-    if (!vp.vh || !vp.h) continue;
-    const k = vp.h / vp.vh;
-    const c = Math.cos(vp.twist), s = Math.sin(vp.twist);
-    let Mv = mmul(M, [1, 0, 0, 1, vp.cx, vp.cy]);
-    Mv = mmul(Mv, [c * k, s * k, -s * k, c * k, 0, 0]);
-    Mv = mmul(Mv, [1, 0, 0, 1, -vp.vcx + ms.origin[0], -vp.vcy + ms.origin[1]]);
-    const a = mapply(M, vp.cx - vp.w / 2, vp.cy - vp.h / 2), b = mapply(M, vp.cx + vp.w / 2, vp.cy + vp.h / 2);
-    ctx.save();
-    ctx.beginPath(); ctx.rect(Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])); ctx.clip();
-    R.drawSpace(ctx, ms, Mv, [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])], { dpr: DPR });
-    ctx.restore();
-    ctx.strokeStyle = 'rgba(128,128,128,.6)'; ctx.lineWidth = 1; ctx.strokeRect(Math.min(a[0], b[0]) + .5, Math.min(a[1], b[1]) + .5, Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]));
+    if (!vp.vh || !vp.h || !ms) continue;
+    const Mv = mmul(M, vpMatrix(vp, ms));
+    const poly = vp.clip || [[vp.cx - vp.w / 2, vp.cy - vp.h / 2], [vp.cx + vp.w / 2, vp.cy - vp.h / 2], [vp.cx + vp.w / 2, vp.cy + vp.h / 2], [vp.cx - vp.w / 2, vp.cy + vp.h / 2]];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    c2.save(); c2.setTransform(1, 0, 0, 1, 0, 0); c2.beginPath();
+    poly.forEach((p, i) => { const q = mapply(M, p[0], p[1]); if (i) c2.lineTo(q[0], q[1]); else c2.moveTo(q[0], q[1]); x0 = Math.min(x0, q[0]); y0 = Math.min(y0, q[1]); x1 = Math.max(x1, q[0]); y1 = Math.max(y1, q[1]); });
+    c2.closePath();
+    if (x1 < rect[0] || x0 > rect[2] || y1 < rect[1] || y0 > rect[3]) { c2.restore(); continue; }
+    c2.clip();
+    R.layerOn = vpLayers(vp, saved);
+    R.drawSpace(c2, ms, Mv, [Math.max(x0, rect[0]), Math.max(y0, rect[1]), Math.min(x1, rect[2]), Math.min(y1, rect[3])], { dpr });
+    R.layerOn = saved;
+    c2.restore();
   }
+  // 图纸空间自身的图元画在视口内容之上（图框、标注等）
+  R.drawSpace(c2, sp, M, rect, { dpr });
 }
 const CMP_COLORS = { del: '#ff4d4f', add: '#2fd36b', mod: '#ffc531', modOld: '#ff8a3d', sameDim: '#5d6672', sameDimW: '#a3abb6', sameHi: '#3fa9ff' };
 function cmpLayers(d, M, rect, set, ctx2 = ctx, dpr = DPR) {
@@ -1096,7 +1112,7 @@ function refreshSide() {
   requestAnimationFrame(() => { sizeCanvas(); redraw(); });
   if (!id) return;
   const d = state.cur;
-  $('#side-title').textContent = { layers: tr('图层'), stats: tr('测量统计'), find: tr('文字查找'), compare: tr('图纸对比'), help: tr('帮助与快捷键') }[id];
+  $('#side-title').textContent = { layers: tr('图层'), stats: tr('测量统计'), find: tr('文字查找'), compare: tr('图纸对比'), help: tr('帮助与快捷键'), oles: tr('嵌入表格（OLE）') }[id];
   body.innerHTML = '';
   if (id === 'help') return helpPanel(body);
   if (!d) { body.innerHTML = `<div class="empty-note">${tr('先打开一张图纸')}</div>`; return; }
@@ -1104,6 +1120,37 @@ function refreshSide() {
   else if (id === 'stats') statsPanel(body, d);
   else if (id === 'find') findPanel(body, d);
   else if (id === 'compare') comparePanel(body, d);
+  else if (id === 'oles') olePanel(body, d);
+}
+// 图纸里嵌入的 OLE 对象（多为设计院附的 Excel 工程量表）：定位查看，或把原始 Excel 文件另存出来
+function olePanel(body, d) {
+  if (d.kind !== 'drawing') { body.innerHTML = `<div class="empty-note">${tr('对比视图里不显示嵌入表格')}</div>`; return; }
+  const list = [];
+  spaces(d).forEach((sp, si) => (sp.oles || []).forEach((o, k) => list.push({ o, si, sp, k })));
+  if (!list.length) { body.append(h('div', { cls: 'empty-note', text: tr('这张图纸里没有嵌入的 OLE 对象。') })); return; }
+  body.append(h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;margin-bottom:8px', text: tr('共 {0} 个。显示的是保存图纸时 Windows 记录的预览；「另存 Excel」导出的是嵌入的原始表格文件。', list.length) }));
+  for (const it of list) {
+    const title = oleTitle(it.o) || tr('OLE 对象 {0}', it.k + 1);
+    const row = h('div', { cls: 'mrow', style: 'display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #e6e9ee' },
+      h('div', { style: 'flex:1;min-width:0' }, h('div', { style: 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis', text: title, title }), h('div', { style: 'color:#7a8594;font-size:11px', text: spName(it.sp) + (it.o.prog ? ' · ' + it.o.prog : '') })),
+      h('button', { cls: 'btn', text: tr('定位'), onclick: () => locateOle(d, it) }),
+      it.o.pkg ? h('button', { cls: 'btn', text: tr('另存 Excel'), onclick: () => saveBytes(baseName(d) + '_' + safeName(title) + '.xlsx', it.o.pkg) }) : null);
+    body.append(row);
+  }
+}
+function oleTitle(o) {
+  // 取预览里字号最大的一行文字作为标题（通常是「××材料表」「工程量表」）
+  let best = null;
+  for (const op of o.pic.ops) if (op.t === 'T' && op.s.trim().length > 1 && (!best || Math.abs(op.h) > Math.abs(best.h) + 0.5)) best = op;
+  if (!best) return '';
+  const line = o.pic.ops.filter(op => op.t === 'T' && Math.abs(op.y - best.y) < Math.abs(best.h) * 0.3 && Math.abs(op.h) === Math.abs(best.h)).sort((a, b) => a.x - b.x).map(op => op.s).join('');
+  return line.trim().slice(0, 60);
+}
+function safeName(s) { return s.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40); }
+function locateOle(d, it) {
+  if (d.spaceIdx !== it.si) { d.spaceIdx = it.si; renderSpaceTabs(); }
+  const b = it.o.bb; const w = Math.max(b[2] - b[0], b[3] - b[1]) * 0.05;
+  zoomTo([b[0] - w, b[1] - w, b[2] + w, b[3] + w], 20);
 }
 function h(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);

@@ -4,7 +4,7 @@
 
 状态标记：`✅` 已实现（在当前版本中可用）· `🚧` 部分实现 · `📋` 规划中
 
-状态依据 v0.1.1 的源代码核定。规划项的顺序不代表承诺的发布时间。
+状态依据 v0.1.2 的源代码核定。规划项的顺序不代表承诺的发布时间。
 
 ## 产品边界
 
@@ -22,7 +22,7 @@
 
 ## 要解决的问题
 
-| 痛点 | 现状 | 闪电看图 v0.1.1 |
+| 痛点 | 现状 | 闪电看图 v0.1.2 |
 | --- | --- | --- |
 | CAD 打开慢、卡顿 | 大图纸、外部参照多、垃圾块多，低配电脑卡死 | ✅ 不需要安装 CAD；图纸在后台线程解析，界面不卡死。外部参照暂不加载 |
 | 图层混乱 | 命名不规范、中文乱码，构件归属分不清 | ✅ 图层开关、搜索、隔离；🚧 按代码页解码中文；📋 图层语义归类 |
@@ -105,6 +105,6 @@
 
 Lightning Peek does two things: open DWG/DXF drawings quickly and make what is in them easy to find and check. It is not a CAD editor, a BIM or 3D tool, a replacement for professional quantity take-off software, and it never modifies the original drawing.
 
-Available in v0.1.1: opening DWG/DXF, layer on/off/search/isolate, block counts, lengths, areas (including picked areas with islands), text search with location, Excel export, a measurement disclaimer, and two-drawing comparison.
+Available in v0.1.2: opening DWG/DXF, layer on/off/search/isolate, block counts, lengths, areas (including picked areas with islands), text search with location, Excel export, a measurement disclaimer, and two-drawing comparison.
 
 Planned: WebGL rendering for very large drawings, attribute extraction, structured search by specification, text re-assembly, layer classification, drawing checks (conflicting or missing dimensions, elevation conflicts), and optional AI assistance (natural-language questions, component recognition). AI features will be off by default and will state clearly where data goes.

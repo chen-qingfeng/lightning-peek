@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.1.1 preview</b> (Windows 10 / 11, 64-bit)</p>
+<p align="center"><b>Current version: v0.1.2 preview</b> (Windows 10 / 11, 64-bit)</p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 
@@ -47,7 +47,7 @@ This is a preview. It has been checked on a limited set of drawings (see [Suppor
 
 ## Problems it addresses
 
-| Problem | What v0.1.1 does |
+| Problem | What v0.1.2 does |
 | --- | --- |
 | Starting a large CAD package just to look at a drawing | Portable app, no installation |
 | Messy layers | Layer on/off, search and isolate |
@@ -60,7 +60,7 @@ The full plan — layer classification, drawing checks, natural-language queries
 
 ## Install and first use
 
-1. Download `LightningPeek-0.1.1-win-x64.zip` from [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) and unzip it anywhere, for example `D:\Tools\LightningPeek`.
+1. Download `LightningPeek-0.1.2-win-x64.zip` from [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) and unzip it anywhere, for example `D:\Tools\LightningPeek`.
 2. Double-click `LightningPeek.exe`. Nothing is installed and no administrator rights are needed.
    Windows SmartScreen may warn that the app is from an unknown publisher, because the preview is not code-signed. Choose **More info → Run anyway** only if you downloaded it from this repository's Releases page.
 3. Click **Open** or drag a `.dwg` / `.dxf` file into the window.
@@ -94,13 +94,13 @@ Tool shortcuts (default): `1` Length · `2` Polyline · `3` Area · `4` Pick are
 | DXF (binary) | Not supported. |
 | Export | PNG, PDF (A3), Excel (measurements, find results, tables, comparison report), DXF (copy with your text edits). DWG cannot be written. |
 
-Known limitations in v0.1.1:
+Known limitations in v0.1.2:
 
 - SHX fonts are drawn with system fonts (FangSong, SimSun and similar), so text width can differ slightly from AutoCAD.
 - Custom objects from vertical software (for example TArch walls and doors) are not shown unless the drawing was exported to plain entities (“T3” format).
-- External references (xrefs), raster images, OLE objects, wipeouts, 3D solids, regions and multileaders are not shown.
+- External references (xrefs), wipeouts, 3D solids, regions and multileaders are not shown. Raster images are shown as an outline only.
+- OLE objects are shown from the preview stored in the drawing. If the drawing has no preview for an object, only its frame is drawn.
 - Line weights are not displayed; complex line types are drawn as simple dashes.
-- Layout viewports show model space, but per-viewport layer settings are ignored.
 - Opening speed has only been measured on one 380 KB drawing (see [docs/FORMATS.md](docs/FORMATS.md)); there are no systematic performance tests on Windows hardware yet.
 
 The full list of supported entities is in [docs/FORMATS.md](docs/FORMATS.md).
