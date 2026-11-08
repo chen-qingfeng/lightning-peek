@@ -14,6 +14,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 - Layout → Model: export the current layout, including clipped viewport contents, as a flat model-space DXF.
 
 ### Changed
+- No CLA any more: contributions are accepted under GPL-3.0-or-later, the project's license. Added a code of conduct and a security policy.
 - The drawing unit is detected automatically: from "L=" pipe length labels next to lines, then the file header, then survey coordinates. Drawings in metres are no longer measured as millimetres. The reason is shown in the status bar; click it to change.
 - Scale settings from older markup files are only reused when they were set by hand.
 

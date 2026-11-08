@@ -145,7 +145,8 @@ npm run pack:win     # 生成 dist/LightningPeek-<版本>-win-x64.zip
 
 - 报告问题、打不开的图纸：[提交 Issue](https://github.com/chen-qingfeng/lightning-peek/issues/new/choose)。请不要上传含保密信息的图纸。
 - 欢迎提交 Pull Request，请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
-- **贡献者许可协议（CLA）**：Pull Request 合并前，需要在 PR 中勾选同意 [CLA](CLA.md)。你的贡献版权仍归你所有；协议允许维护者以其他条款（例如将来的商业版本）提供闪电看图。本仓库已发布的内容继续以 GPL-3.0-or-later 开源。
+- **不签 CLA**：贡献按本项目的许可证 GPL-3.0-or-later 接收（贡献进来和发布出去用同一个许可证），版权仍归你本人。
+- **从哪里开始**：看标了 [good first issue](https://github.com/chen-qingfeng/lightning-peek/labels/good%20first%20issue) 和 [help wanted](https://github.com/chen-qingfeng/lightning-peek/labels/help%20wanted) 的 Issue。请遵守[行为准则](CODE_OF_CONDUCT.md)；安全问题按 [SECURITY.md](SECURITY.md) 私下报告。
 
 ## 许可证与致谢
 

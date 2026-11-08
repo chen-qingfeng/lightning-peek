@@ -6,5 +6,5 @@
 - [ ] `npm test` passes
 - [ ] Tried the change in the app (`npm start`) with: <!-- which drawing / 用了哪张图纸 -->
 
-## Contributor License Agreement / 贡献者许可协议
-- [ ] I have read and agree to the [CLA](https://github.com/chen-qingfeng/lightning-peek/blob/main/CLA.md). 我已阅读并同意 [CLA](https://github.com/chen-qingfeng/lightning-peek/blob/main/CLA.md)。
+## License / 许可
+- [ ] My contribution is licensed under GPL-3.0-or-later, the project's license. 我的贡献按本项目的许可证 GPL-3.0-or-later 发布。

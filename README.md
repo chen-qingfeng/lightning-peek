@@ -142,7 +142,8 @@ See [docs/ROADMAP.md](docs/ROADMAP.md) for the full plan and [CHANGELOG.md](CHAN
 
 - Bugs and drawings that fail to open: [open an issue](https://github.com/chen-qingfeng/lightning-peek/issues/new/choose). Please do not attach drawings that contain confidential information.
 - Pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
-- **Contributor License Agreement:** before a pull request is merged, you agree to the [CLA](CLA.md) by ticking a box in the pull request. You keep the copyright in your contribution; the CLA lets the maintainer also offer Lightning Peek under other terms, such as a future commercial edition. Everything released here stays under GPL-3.0-or-later.
+- **No CLA.** Contributions are accepted under the project's license, GPL-3.0-or-later (inbound = outbound). You keep the copyright in your work.
+- **Where to start:** issues labelled [good first issue](https://github.com/chen-qingfeng/lightning-peek/labels/good%20first%20issue) and [help wanted](https://github.com/chen-qingfeng/lightning-peek/labels/help%20wanted). Please follow the [code of conduct](CODE_OF_CONDUCT.md); report security problems as described in [SECURITY.md](SECURITY.md).
 
 ## License and credits
 
