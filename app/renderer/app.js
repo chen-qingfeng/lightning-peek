@@ -191,13 +191,18 @@ async function command(id, e) {
       if (MODAL_TOOLS.has(id)) setTool(state.tool === id ? null : id);
   }
 }
+// 线性尺寸的尺寸线两端（局部坐标，水平/竖直指图纸坐标轴）
+function linEnds(p, orient) { const a = p[0], b = p[1], D = p[2] || p[1]; return orient === 'v' ? [[D[0], a[1]], [D[0], b[1]]] : [[a[0], D[1]], [b[0], D[1]]]; }
+// 图纸里方向角 ang（弧度）在屏幕上的角度
+function scrAng(q, ang) { const a = toScreen(q[0], q[1]), b = toScreen(q[0] + Math.cos(ang), q[1] + Math.sin(ang)); return Math.atan2(b[1] - a[1], b[0] - a[0]); }
 function linOrient(a, b, o) { const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2; const w = Math.abs(b[0] - a[0]), hh = Math.abs(b[1] - a[1]);
   // 光标在两点竖向范围之外更远时标水平尺寸，否则标竖直尺寸（同 CAD 的线性标注）
   return Math.abs(o[1] - my) - hh / 2 >= Math.abs(o[0] - mx) - w / 2 ? 'h' : 'v'; }
 function footOn(p, a, b) { const dx = b[0] - a[0], dy = b[1] - a[1]; const l = dx * dx + dy * dy || 1; const t = ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l; return [a[0] + t * dx, a[1] + t * dy]; }
+function resetToolState() { state.tmp = []; state.tmpArc = new Set(); state.arcPending = false; state.batchSel = []; state.p2lSeg = null; state.hoverCurve = null; state.hoverCircle = null; state.hoverRegion = null; }
 function setTool(t) {
   if (t && t !== 'calib' && t !== 'findbox') { const ti = tabOf(t); if (ti >= 0 && ti !== state.tab) { state.tab = ti; buildToolbar(); } }
-  state.tool = t; state.tmp = []; state.hover = null; state.tmpArc = new Set(); state.arcPending = false; state.arcMode = false; state.batchSel = []; state.p2lSeg = null; state.hoverCurve = null;
+  state.tool = t; resetToolState(); state.hover = null; state.arcMode = false;
   cv.className = t ? (PICK_TOOLS.has(t) ? 'pick' : 'cross') : 'pan';
   $('#st-tool').textContent = t ? '▶ ' + (TOOL_HINT[t] || '') + tr('　Esc 退出') : '';
   hideTip(); refreshToolbar(); redraw();
@@ -301,9 +306,14 @@ function labelUnitVote(ms) {
     if (ks.size) any++; for (const k of ks) votes.set(k, (votes.get(k) || 0) + 1);
   }
   let best = null, bn = 0; for (const [k, n] of votes) if (n > bn) { bn = n; best = k; }
-  return bn >= 3 && bn >= any * 0.6 ? best : null;
+  if (!(bn >= 3 && bn >= any * 0.6)) return null;
+  // 标注值等于线长（比例 1）时，既可能是「米制图纸配米制标注」，也可能是「毫米图纸配毫米标注」：
+  // 只有标注多数带小数（如 L=24.31）或坐标是测量坐标时才判为米，否则交给后面的规则
+  if (best === 0) { const dec = labs.filter(([t]) => /\d\.\d/.test(t.s)).length; if (!(dec >= labs.length * 0.5 || geodetic(ms))) return null; }
+  return best;
 }
 const UNIT_WHY = { label: '按图上「L=」管长标注判断', coord: '按测量坐标判断', header: '按图纸文件设置', default: '默认', manual: '手动设置' };
+function legacyUf(sc) { const u = sc.insunits, cjk = /[\u4e00-\u9fff]/; const chinese = sc.layers.some(l => cjk.test(l.name)) || sc.spaces.some(sp => sp.texts.slice(0, 500).some(t => cjk.test(t.s))); if (!chinese && sc.measurement === 0 && (u === 1 || u === 2)) return u === 1 ? 25.4 : 304.8; return { 5: 10, 6: 1000, 14: 100 }[u] || 1; }
 function unitFor(sc) { const g = guessUnit(sc); return { uf: g.uf, len: g.uf >= 1000 ? 'm' : 'mm', area: 'm2', dec: 2, why: g.why, ts: 0, color: '', tick: 'oblique' }; }
 function sidecarPath(doc) { return doc.path ? doc.path + '.lpeek.json' : null; }
 async function loadSidecar(doc) {
@@ -313,7 +323,9 @@ async function loadSidecar(doc) {
     const j = typeof raw === 'string' ? JSON.parse(raw) : raw;
     if (Array.isArray(j.measures)) doc.measures.push(...j.measures);
     if (Array.isArray(j.annots)) doc.annots.push(...j.annots);
-    if (j.unit && j.unit.manual) Object.assign(doc.unit, j.unit); // 旧版自动保存的比例不再沿用，只认手动设置
+    // 0.1.2 及以前每次都保存比例、没有 manual 标记：和当时的默认值不同，才说明是用户改过的，继续沿用
+    const legacyManual = j.unit && !('manual' in j.unit) && (Math.abs((j.unit.uf || 1) - legacyUf(doc.scene)) > 1e-9 || (j.unit.len && j.unit.len !== 'mm') || (j.unit.area && j.unit.area !== 'm2') || (j.unit.dec !== undefined && j.unit.dec !== 2));
+    if (j.unit && (j.unit.manual || legacyManual)) { Object.assign(doc.unit, j.unit); doc.unit.manual = true; doc.unit.why = 'manual'; }
     else if (j.unit) for (const k of ['ts', 'color', 'tick']) if (j.unit[k] !== undefined) doc.unit[k] = j.unit[k];
     if (Array.isArray(j.cats)) doc.cats = [...new Set([...doc.cats, ...j.cats])];
     if (j.cat) doc.cat = j.cat;
@@ -334,7 +346,7 @@ window.addEventListener('beforeunload', flushSidecars);
 
 // ---------------- 文档标签 / 空间 ----------------
 function activate(doc) {
-  state.cur = doc; state.tmp = []; state.hover = null;
+  state.cur = doc; resetToolState(); state.hover = null;
   if (doc) { R.layerOn = doc.layerOn; document.title = doc.name + tr(' - 闪电看图'); }
   else document.title = tr('闪电看图');
   $('#empty').classList.toggle('hidden', !!doc);
@@ -372,7 +384,7 @@ function renderSpaceTabs() {
   const sps = spaces(d); if (sps.length < 2) return;
   sps.forEach((s, i) => {
     const t = document.createElement('div'); t.className = 'stab' + (i === d.spaceIdx ? ' on' : ''); t.textContent = spName(s);
-    t.onclick = () => { d.spaceIdx = i; state.tmp = []; if (!d.views[i]) zoomExtents(true); renderSpaceTabs(); refreshSide(); redraw(); };
+    t.onclick = () => { d.spaceIdx = i; resetToolState(); if (!d.views[i]) zoomExtents(true); renderSpaceTabs(); refreshSide(); redraw(); };
     el.appendChild(t);
   });
 }
@@ -407,7 +419,7 @@ function zoomExtents(silent) {
   }
   if (sp.xrefs && sp.xrefs.length && d.xrefDocs) { // 把已加载的外部参照范围也算进来
     bb = [...(Number.isFinite(bb[0]) ? bb : [Infinity, Infinity, -Infinity, -Infinity])];
-    for (const x of sp.xrefs) { const xd = d.xrefDocs.get(x.name.toUpperCase()); const xms = xd && xd.doc && modelSpace(xd.doc); if (!xms) continue; const v = xms.view || xms.bbox; const T = mmul(x.M, [1, 0, 0, 1, xms.origin[0], xms.origin[1]]);
+    for (const x of sp.xrefs) { const xd = d.xrefDocs.get(x.name.toUpperCase()); const xms = xd && xd.doc && modelSpace(xd.doc); if (!xms) continue; const v = xms.view || xms.bbox; if (!v || !Number.isFinite(v[0])) continue; const T = mmul(x.M, [1, 0, 0, 1, xms.origin[0], xms.origin[1]]);
       for (const q of [[v[0], v[1]], [v[2], v[1]], [v[2], v[3]], [v[0], v[3]]]) { const r = mapply(T, q[0], q[1]); bb[0] = Math.min(bb[0], r[0]); bb[1] = Math.min(bb[1], r[1]); bb[2] = Math.max(bb[2], r[0]); bb[3] = Math.max(bb[3], r[1]); } }
   }
   if (!Number.isFinite(bb[0])) bb = [0, 0, 100, 100];
@@ -492,7 +504,8 @@ function drawXrefs(d, c2, sp, M, rect, dpr) {
   for (const x of sp.xrefs) {
     const xd = d.xrefDocs.get(x.name.toUpperCase()); if (!xd || !xd.doc || !R.visible(x.layer)) continue;
     const xms = modelSpace(xd.doc); if (!xms) continue;
-    R.drawSpace(c2, xms, mmul(M, mmul(x.M, [1, 0, 0, 1, xms.origin[0], xms.origin[1]])), rect, { dpr });
+    const saved = R.layerOn; R.layerOn = xd.doc.layerOn; // 用外部图纸自己的图层开关
+    try { R.drawSpace(c2, xms, mmul(M, mmul(x.M, [1, 0, 0, 1, xms.origin[0], xms.origin[1]])), rect, { dpr }); } finally { R.layerOn = saved; }
   }
 }
 function xrefList(d) { const m = new Map(); for (const sp of d.scene.spaces) for (const x of sp.xrefs || []) { const k = x.name.toUpperCase(); if (!m.has(k)) m.set(k, { name: x.name, path: x.path, n: 0 }); m.get(k).n++; } return [...m.values()]; }
@@ -500,7 +513,7 @@ function dirOf(p) { return p ? p.replace(/[\\/][^\\/]*$/, '') : ''; }
 function xrefCandidates(host, ref) {
   if (!ref) return [];
   const sep = host && host.includes('\\') ? '\\' : '/';
-  const norm = (x) => x.replace(/[\\/]+/g, sep);
+  const norm = (x) => { const unc = /^[\\/]{2}[^\\/]/.test(x); const y = x.replace(/[\\/]+/g, sep); return unc ? sep + y : y; }; // 保留网络路径开头的两个斜杠
   const r = norm(ref); const base = r.split(sep).pop(); const dir = dirOf(host); const out = [];
   if (/^([a-z]:|[\\/])/i.test(ref)) out.push(r);
   if (dir) { out.push(dir + sep + r.replace(/^\.[\\/]/, '').replace(/^[a-z]:[\\/]?/i, '')); out.push(dir + sep + base); }
@@ -680,7 +693,7 @@ function applyRec(d, u) {
 }
 function undo() {
   const d = state.cur; if (!d || d.kind !== 'drawing') return;
-  if (state.tmp.length) { state.tmp.pop(); redraw(); return; }
+  if (state.tmp.length) { state.tmp.pop(); for (const i of [...state.tmpArc]) if (i >= state.tmp.length) state.tmpArc.delete(i); state.arcPending = state.tmpArc.has(state.tmp.length - 1); redraw(); return; }
   const u = d.undo.pop(); if (!u) { toast(tr('没有可撤销的操作')); return; }
   (d.redo = d.redo || []).push(applyRec(d, u));
   saveSidecar(d); if (state.side === 'stats') refreshSide(); redraw();
@@ -814,7 +827,7 @@ function alongPts(pts, t) {
 }
 function chainage(du, doc = state.cur) {
   const mm = du * doc.unit.uf; if (doc.unit.len !== 'm') return mm.toFixed(0);
-  const m = mm / 1000, km = Math.floor(m / 1000 + 1e-9); let r = (m - km * 1000).toFixed(doc.unit.dec).replace(/\.0+$/, ''); const [ip, fp] = r.split('.');
+  const dec = doc.unit.dec; const m = +(mm / 1000).toFixed(dec); const km = Math.floor(m / 1000); let r = Math.max(0, m - km * 1000).toFixed(dec).replace(/\.0+$/, ''); const [ip, fp] = r.split('.');
   return 'K' + km + '+' + ip.padStart(3, '0') + (fp ? '.' + fp : '');
 }
 function drawMeasure(m, hi) {
@@ -829,8 +842,7 @@ function drawMeasure(m, hi) {
   switch (m.type) {
     case 'dist': m._lb = drawDim(P[0], P[1], P[2] || null, val.main + note, c, px, tick); break;
     case 'lin': {
-      const D = P[2] || P[1];
-      const A2 = m.orient === 'v' ? [D[0], P[0][1]] : [P[0][0], D[1]], B2 = m.orient === 'v' ? [D[0], P[1][1]] : [P[1][0], D[1]];
+      const [A2, B2] = linEnds(m.pts.map(L), m.orient).map(q => toScreen(q[0], q[1]));
       m._lb = dimLines(P[0], P[1], A2, B2, val.main + note, c, px, tick); break;
     }
     case 'poly': case 'side':
@@ -879,12 +891,12 @@ function drawMeasure(m, hi) {
     case 'seglen': {
       ctx.lineWidth = (hi ? 3 : 2) * DPR; strokePts(P); ctx.lineWidth = 1.3 * DPR;
       ctx.font = `${small}px ${MFONT}`;
-      for (const sg of m.segs) { const q = S(sg.mid); const ang = readAng(-sg.ang); const t0 = fmtLen(sg.len); if (small >= 5 * DPR && sg.len * view().s > ctx.measureText(t0).width * 1.15) rotText(fmtLen(sg.len), q[0] + Math.sin(ang) * small * 0.2, q[1] - Math.cos(ang) * small * 0.2, ang, small, c); dot(S(sg.a), c); }
+      for (const sg of m.segs) { const q = S(sg.mid); const ang = readAng(scrAng(L(sg.mid), sg.ang)); const t0 = fmtLen(sg.len); if (small >= 5 * DPR && sg.len * view().s > ctx.measureText(t0).width * 1.15) rotText(fmtLen(sg.len), q[0] + Math.sin(ang) * small * 0.2, q[1] - Math.cos(ang) * small * 0.2, ang, small, c); dot(S(sg.a), c); }
       m._lb = leader(P[P.length - 1], [tr('总长 ') + val.main + note, val.sub], m, c, px); break;
     }
     case 'batch': {
       ctx.lineWidth = (hi ? 3 : 2) * DPR;
-      for (const it of m.items) { const Q = it.pts.map(S); strokePts(Q); const q = S(it.mid); const ang = readAng(-it.ang); if (small >= 5 * DPR) rotText(fmtLen(it.len), q[0] + Math.sin(ang) * small * 0.2, q[1] - Math.cos(ang) * small * 0.2, ang, small, c); }
+      for (const it of m.items) { const Q = it.pts.map(S); strokePts(Q); const q = S(it.mid); const ang = readAng(scrAng(L(it.mid), it.ang)); if (small >= 5 * DPR) rotText(fmtLen(it.len), q[0] + Math.sin(ang) * small * 0.2, q[1] - Math.cos(ang) * small * 0.2, ang, small, c); }
       ctx.lineWidth = 1.3 * DPR;
       m._lb = leader(P[0], [tr('合计 ') + val.main + note, val.sub], m, c, px); break;
     }
@@ -898,7 +910,7 @@ function drawMeasure(m, hi) {
     case 'stake': {
       ctx.lineWidth = (hi ? 3 : 2) * DPR; strokePts(P); ctx.lineWidth = 1.3 * DPR;
       let lastQ = null;
-      for (const st of m.st) { const q = S(st.p); const showLb = !lastQ || dist(lastQ, q) > small * 1.6; if (showLb) lastQ = q; const a = -st.ang; const n = [-Math.sin(a), Math.cos(a)]; const k = Math.max(5 * DPR, small * 0.7);
+      for (const st of m.st) { const q = S(st.p); const showLb = !lastQ || dist(lastQ, q) > small * 1.6; if (showLb) lastQ = q; const a = scrAng(L(st.p), st.ang); const n = [-Math.sin(a), Math.cos(a)]; const k = Math.max(5 * DPR, small * 0.7);
         ctx.beginPath(); ctx.moveTo(q[0] - n[0] * k, q[1] - n[1] * k); ctx.lineTo(q[0] + n[0] * k, q[1] + n[1] * k); ctx.stroke();
         if (small >= 5 * DPR && showLb) { const ang = readAng(a + Math.PI / 2); rotText(chainage(st.d + (m.k0 || 0)), q[0] + n[0] * k * 1.2, q[1] + n[1] * k * 1.2, ang, small, c, 'left'); } }
       m._lb = leader(P[P.length - 1], [tr('定距 ') + fmtLen(m.iv) + note, tr('全长 ') + val.main], m, c, px); break;
@@ -968,7 +980,7 @@ function drawTemp() {
     ctx.setLineDash([]); ctx.fillStyle = c;
     const a = state.tmp[0], b = state.tmp[1];
     if (t === 'dist') { drawDim(P[0], P[1], cs, fmtLen(dist(a, b)), c, px0, state.cur.unit.tick); live(fmtLen(dist(a, b)) + tr('　单击放置尺寸线')); }
-    else { const o = linOrient(a, b, toLocal(cs[0], cs[1])); const A2 = o === 'v' ? [cs[0], P[0][1]] : [P[0][0], cs[1]], B2 = o === 'v' ? [cs[0], P[1][1]] : [P[1][0], cs[1]]; const v = o === 'v' ? Math.abs(b[1] - a[1]) : Math.abs(b[0] - a[0]); dimLines(P[0], P[1], A2, B2, fmtLen(v), c, px0, state.cur.unit.tick); live((o === 'v' ? tr('竖直 ') : tr('水平 ')) + fmtLen(v)); }
+    else { const o = linOrient(a, b, cur); const [A2, B2] = linEnds([a, b, cur], o).map(q => toScreen(q[0], q[1])); const v = o === 'v' ? Math.abs(b[1] - a[1]) : Math.abs(b[0] - a[0]); dimLines(P[0], P[1], A2, B2, fmtLen(v), c, px0, state.cur.unit.tick); live((o === 'v' ? tr('竖直 ') : tr('水平 ')) + fmtLen(v)); }
   } else if (['dist', 'lin', 'poly', 'side', 'area', 'calib'].includes(t) && P.length && cs) {
     let pts = [...state.tmp, cur];
     if (t === 'area' && state.tmpArc.size) { const mids = new Set(state.tmpArc); pts = flattenArcs(pts, mids); }
@@ -1124,6 +1136,14 @@ function pickItem(px, py) {
       const P = it.pts.map(p => toScreen(...L(p)));
       if (inLb(it._lb)) return { kind, item: it, label: true };
       if (it.type === 'batch') { for (const x of it.items) if (segHit(x.pts.map(q => toScreen(...L(q))))) return { kind, item: it }; continue; }
+      if (it.type === 'dist' || it.type === 'lin') { // 被测线段和尺寸线
+        let A2, B2; const Lp = it.pts.map(L);
+        if (it.type === 'lin') [A2, B2] = linEnds(Lp, it.orient).map(q => toScreen(q[0], q[1]));
+        else { const [A, B] = [P[0], P[1]]; const l0 = dist(A, B) || 1; const n = [-(B[1] - A[1]) / l0, (B[0] - A[0]) / l0]; const off = P[2] ? (P[2][0] - A[0]) * n[0] + (P[2][1] - A[1]) * n[1] : 0; A2 = [A[0] + n[0] * off, A[1] + n[1] * off]; B2 = [B[0] + n[0] * off, B[1] + n[1] * off]; }
+        if (segHit([P[0], P[1]]) || segHit([A2, B2])) return { kind, item: it }; continue;
+      }
+      if (it.type === 'p2l') { if (segHit([P[2], P[3]])) return { kind, item: it }; continue; }
+      if (it.type === 'circle') { if (Math.abs(dist([px, py], P[0]) - dist(P[0], P[1])) < tol) return { kind, item: it }; continue; }
       if (it.type === 'count') { if (P.length && dist(P[0], [px, py]) < tol * 2) return { kind, item: it }; continue; }
       if (it.type === 'rect' || it.type === 'cloud' || it.type === 'boxlen') { const x0 = Math.min(P[0][0], P[1][0]), x1 = Math.max(P[0][0], P[1][0]), y0 = Math.min(P[0][1], P[1][1]), y1 = Math.max(P[0][1], P[1][1]); if (segHit([[x0, y0], [x1, y0], [x1, y1], [x0, y1]], true)) return { kind, item: it }; }
       else if (it.type === 'radius') { if (Math.abs(dist([px, py], P[0]) - dist(P[0], P[1])) < tol || segHit(P)) return { kind, item: it }; }
@@ -1136,27 +1156,31 @@ function pickItem(px, py) {
 // ---- 点选曲线（弧长、分段、批量、定距、点到线）----
 function curveIndex(sp) {
   if (sp._cIdx) return sp._cIdx;
-  const c = sp.curves, bb = sp.bbox; const size = Math.max(bb[2] - bb[0], bb[3] - bb[1], 1e-9); const cell = size / 256; const g = new Map(); const big = [];
+  // 网格按图纸主体范围（去掉远处零星图元）建立，超出范围的落到边缘格子里
+  const c = sp.curves, bb = sp.view || sp.bbox; const N = 256; const size = Math.max(bb[2] - bb[0], bb[3] - bb[1], 1e-9); const cell = size / N; const g = new Map(); const big = [];
+  const cl = (v) => Math.max(0, Math.min(N - 1, v));
   for (let i = 0, ci = 0; i < c.length; i += 6, ci++) {
     if (!sp.cinfo || !sp.cinfo[ci * 3 + 1]) continue;
-    const i0 = Math.floor((c[i + 1] - bb[0]) / cell), i1 = Math.floor((c[i + 3] - bb[0]) / cell), j0 = Math.floor((c[i + 2] - bb[1]) / cell), j1 = Math.floor((c[i + 4] - bb[1]) / cell);
+    const i0 = cl(Math.floor((c[i + 1] - bb[0]) / cell)), i1 = cl(Math.floor((c[i + 3] - bb[0]) / cell)), j0 = cl(Math.floor((c[i + 2] - bb[1]) / cell)), j1 = cl(Math.floor((c[i + 4] - bb[1]) / cell));
     if ((i1 - i0 + 1) * (j1 - j0 + 1) > 64) { big.push(ci); continue; }
     for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const k = x * 100003 + y; let l = g.get(k); if (!l) g.set(k, l = []); l.push(ci); }
   }
-  return (sp._cIdx = { g, big, cell, bb });
+  return (sp._cIdx = { g, big, cell, bb, N, cl });
 }
 function pickCurve(p, filter) {
   const sp = curSpace(); if (!sp || !sp.cinfo || !sp.cpts) return null;
-  const I = curveIndex(sp); const tol = 8 * DPR / view().s; const cand = new Set(I.big);
-  const i0 = Math.floor((p[0] - tol - I.bb[0]) / I.cell), i1 = Math.floor((p[0] + tol - I.bb[0]) / I.cell), j0 = Math.floor((p[1] - tol - I.bb[1]) / I.cell), j1 = Math.floor((p[1] + tol - I.bb[1]) / I.cell);
-  if ((i1 - i0 + 1) * (j1 - j0 + 1) <= 400) for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const l = I.g.get(x * 100003 + y); if (l) for (const ci of l) cand.add(ci); }
-  const c = sp.curves, P = sp.cpts; let best = null, bd = tol;
-  for (const ci of cand) {
-    const i = ci * 6; if (p[0] < c[i + 1] - tol || p[0] > c[i + 3] + tol || p[1] < c[i + 2] - tol || p[1] > c[i + 4] + tol) continue;
-    if (!layerVisible(sp, c[i + 5])) continue; const kind = sp.cinfo[ci * 3 + 2]; if (filter && !filter(kind)) continue;
+  const I = curveIndex(sp); const tol = 8 * DPR / view().s;
+  const c = sp.curves, P = sp.cpts; let best = null, bd = tol; const seen = new Set();
+  const test = (ci) => {
+    if (seen.has(ci)) return; seen.add(ci);
+    const i = ci * 6; if (p[0] < c[i + 1] - tol || p[0] > c[i + 3] + tol || p[1] < c[i + 2] - tol || p[1] > c[i + 4] + tol) return;
+    if (!layerVisible(sp, c[i + 5])) return; const kind = sp.cinfo[ci * 3 + 2]; if (filter && !filter(kind)) return;
     const s0 = sp.cinfo[ci * 3], n = sp.cinfo[ci * 3 + 1];
     for (let k = 0; k + 1 < n; k++) { const a = [P[(s0 + k) * 2], P[(s0 + k) * 2 + 1]], b = [P[(s0 + k + 1) * 2], P[(s0 + k + 1) * 2 + 1]]; const dd = segDist(p, a, b); if (dd < bd) { bd = dd; best = { ci, seg: k, a, b }; } }
-  }
+  };
+  const i0 = I.cl(Math.floor((p[0] - tol - I.bb[0]) / I.cell)), i1 = I.cl(Math.floor((p[0] + tol - I.bb[0]) / I.cell)), j0 = I.cl(Math.floor((p[1] - tol - I.bb[1]) / I.cell)), j1 = I.cl(Math.floor((p[1] + tol - I.bb[1]) / I.cell));
+  if ((i1 - i0 + 1) * (j1 - j0 + 1) <= 400) for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const l = I.g.get(x * 100003 + y); if (l) for (const ci of l) test(ci); }
+  for (const ci of I.big) test(ci);
   return best;
 }
 function curveGeom(sp, ci) {
@@ -1210,9 +1234,9 @@ cv.addEventListener('pointerdown', (e) => {
   cv.setPointerCapture(e.pointerId);
   const [px, py] = evPt(e);
   if (e.button === 0 && state.cur.kind === 'compare' && state.cur.cmpMode === 'swipe' && Math.abs(px - cv.width * state.cur.swipe) < 18 * DPR) { state.drag = { swipe: true }; return; }
-  if (e.button === 0 && !state.tool && state.hover && state.cur.kind === 'drawing' && state.hover.label && state.hover.kind === 'm') {
+  if (e.button === 0 && !state.tool && state.hover && state.cur.kind === 'drawing' && state.hover.label && state.hover.kind === 'm' && !['angle', 'p2l'].includes(state.hover.item.type)) {
     const it = state.hover.item; const dim = it.type === 'dist' || it.type === 'lin';
-    state.drag = { lab: true, dim, item: it, start: toLocal(px, py), x: px, y: py, maxMoved: 0, origLo: (it.lo || loNow()).slice(), origPts: it.pts.map(q => q.slice()) }; return;
+    state.drag = { lab: true, dim, item: it, start: toLocal(px, py), x: px, y: py, maxMoved: 0, origLo: (it.lo || loNow()).slice(), origPts: it.pts.map(q => q.slice()), origOrient: it.orient }; return;
   }
   if (e.button === 0 && !state.tool && state.hover && state.cur.kind === 'drawing' && !FIXED_TYPES.has(state.hover.item.type)) {
     state.drag = { item: true, hit: state.hover, x: px, y: py, start: toLocal(px, py), copy: e.ctrlKey, moved: 0, maxMoved: 0, orig: state.hover.item.pts.map(q => q.slice()), origHoles: state.hover.item.holes ? state.hover.item.holes.map(hl => hl.map(q => q.slice())) : null }; return;
@@ -1243,7 +1267,7 @@ cv.addEventListener('pointermove', (e) => {
     if (dr.maxMoved > 3 * DPR) {
       const q = toLocal(px, py); const dx = q[0] - dr.start[0], dy = q[1] - dr.start[1]; const it = dr.item;
       if (dr.dim) { const o = dr.origPts; const base = o[2] || [(o[0][0] + o[1][0]) / 2, (o[0][1] + o[1][1]) / 2]; it.pts = [o[0], o[1], [base[0] + dx, base[1] + dy]]; if (it.type === 'lin' && !it.orientLock) it.orient = linOrient(L(o[0]), L(o[1]), L(it.pts[2])); }
-      else it.lo = [dr.origLo[0] + dx, dr.origLo[1] + dy];
+      else { const s0 = view().s; it.lo = [dr.origLo[0] + (px - dr.x) / s0, dr.origLo[1] - (py - dr.y) / s0]; } // lo 是屏幕方向上的偏移（图纸单位）
       cv.className = 'panning'; redraw();
     }
     return;
@@ -1267,7 +1291,7 @@ cv.addEventListener('pointermove', (e) => {
   if (CURVE_TOOLS.has(state.tool) && !(state.tool === 'p2l' && state.tmp.length)) state.hoverCurve = pickCurve(toLocal(px, py), state.tool === 'p2l' ? (k) => k === 1 || k === 4 || k === 0 : null);
   if (state.tool === 'areapick') state.hoverRegion = findRegion(toLocal(px, py));
   if (state.tool === 'erase') { state.hover = pickItem(px, py); }
-  if (!state.tool && state.cur.kind === 'drawing') { const h = pickItem(px, py); if ((h && h.item) !== (state.hover && state.hover.item)) { state.hover = h; cv.className = h ? 'pick' : 'pan'; } }
+  if (!state.tool && state.cur.kind === 'drawing') { const h = state.hideMarks ? null : pickItem(px, py); const changed = (h && h.item) !== (state.hover && state.hover.item); state.hover = h; if (changed) cv.className = h ? 'pick' : 'pan'; }
   if (state.tool === 'count') state.hoverInsert = findInsert(toLocal(px, py));
   if (state.tool === 'edittext') state.hoverText = findText(toLocal(px, py));
   if (!['dist', 'lin', 'poly', 'side', 'area', 'rectarea', 'angle', 'radius', 'circle', 'areapick', 'coord', 'calib', 'boxlen', 'count', 'edittext', 'p2l', ...CURVE_TOOLS].includes(state.tool)) hideTip();
@@ -1278,7 +1302,7 @@ cv.addEventListener('pointerup', (e) => {
   if (!dr || dr.swipe) return;
   if (dr.lab) {
     const d = state.cur;
-    if (dr.maxMoved > 3 * DPR) { d.undo.push(dr.dim ? { op: 'move', item: dr.item, old: dr.origPts } : { op: 'props', item: dr.item, old: { lo: dr.origLo } }); d.redo = []; saveSidecar(d); cv.className = 'pick'; return; }
+    if (dr.maxMoved > 3 * DPR) { pushUndo(d, dr.dim ? { op: 'props', item: dr.item, old: { pts: dr.origPts, orient: dr.origOrient } } : { op: 'props', item: dr.item, old: { lo: dr.origLo } }); saveSidecar(d); cv.className = 'pick'; return; }
     dr.click = true; dr.item = true;
   }
   if (dr.item) {
@@ -1340,8 +1364,11 @@ async function toolClick(p, screen) {
       if (t === 'arclen') { const mid = along(g.len / 2); addItem('m', { type: 'arclen', pts: thin(g.pts).map(W), len: g.len, ck: g.kind, mid: W(mid.p), ts: tsNow(), lo: loNow(), cat: d.cat }); break; }
       if (t === 'seglen') {
         const idx = []; g.vf.forEach((f, i) => { if (f) idx.push(i); }); if (idx[0] !== 0) idx.unshift(0); if (idx[idx.length - 1] !== g.pts.length - 1) idx.push(g.pts.length - 1);
-        const fl = polyLen(g.pts) || 1, k = g.len / fl; const segs = [];
-        for (let j = 0; j + 1 < idx.length; j++) { const part = g.pts.slice(idx[j], idx[j + 1] + 1); const l = polyLen(part) * k; if (l <= 0) continue; const mm = alongPts(part, polyLen(part) / 2); segs.push({ len: l, mid: W(mm.p), ang: mm.ang, a: W(part[0]) }); }
+        // 直线段用原长；圆弧段是离散的，按总长差额等比放大
+        const parts = []; for (let j = 0; j + 1 < idx.length; j++) parts.push(g.pts.slice(idx[j], idx[j + 1] + 1));
+        const straight = parts.filter(q => q.length === 2).reduce((a, q) => a + polyLen(q), 0), curved = parts.filter(q => q.length > 2).reduce((a, q) => a + polyLen(q), 0);
+        const k = curved > 0 ? Math.max(0, g.len - straight) / curved : 1; const segs = [];
+        for (const part of parts) { const l = polyLen(part) * (part.length > 2 ? k : 1); if (l <= 0) continue; const mm = alongPts(part, polyLen(part) / 2); segs.push({ len: l, mid: W(mm.p), ang: mm.ang, a: W(part[0]) }); }
         addItem('m', { type: 'seglen', pts: thin(g.pts).map(W), len: g.len, segs: segs.slice(0, 5000), ts: tsNow(), lo: loNow(), cat: d.cat }); break;
       }
       // 定距：从离点击处较近的一端开始
@@ -1491,14 +1518,16 @@ function findShapes(a, b) {
   // 曲线中心的网格索引
   const g = new Map(); const key = (x, y) => Math.round(x / q) * 1000003 + Math.round(y / q);
   for (let i = 0, ci = 0; i < c.length; i += 6, ci++) { if (!layerVisible(sp, c[i + 5])) continue; const p = cen(ci); const k = key(p[0], p[1]); let l = g.get(k); if (!l) g.set(k, l = []); l.push(ci); }
-  const near = (x, y) => { const out = []; const gx = Math.round(x / q), gy = Math.round(y / q); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = g.get((gx + i) * 1000003 + gy + j); if (l) out.push(...l); } return out; };
-  const hits = [];
+  const C = []; for (let ci = 0; ci < c.length / 6; ci++) C.push(cen(ci));
+  const hasMatch = (x, y, tj) => { const gx = Math.round(x / q), gy = Math.round(y / q); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = g.get((gx + i) * 1000003 + gy + j); if (l) for (const ck of l) if (same(ck, tj) && Math.hypot(C[ck][0] - x, C[ck][1] - y) <= q * 1.5) return true; } return false; };
+  const hits = []; const hitKeys = new Set();
   for (let i = 0, ci = 0; i < c.length; i += 6, ci++) {
     if (kindOf(ci) !== AK || Math.abs(c[i] - AL) > Math.max(q, AL * 0.002) || !same(ci, anchor) || !layerVisible(sp, c[i + 5])) continue;
     const p = cen(ci); const dx = p[0] - AC[0], dy = p[1] - AC[1];
     let ok = true;
-    for (const tj of tpl) { if (tj === anchor) continue; const tc = cen(tj); if (!near(tc[0] + dx, tc[1] + dy).some(ck => same(ck, tj) && Math.hypot(cen(ck)[0] - tc[0] - dx, cen(ck)[1] - tc[1] - dy) <= q * 1.5)) { ok = false; break; } }
-    if (ok && !hits.some(h0 => Math.hypot(h0[0] - dx, h0[1] - dy) < q)) hits.push([dx, dy]);
+    for (const tj of tpl) { if (tj === anchor) continue; const tc = C[tj]; if (!hasMatch(tc[0] + dx, tc[1] + dy, tj)) { ok = false; break; } }
+    const hk = Math.round(dx / q) + ',' + Math.round(dy / q);
+    if (ok && !hitKeys.has(hk)) { hitKeys.add(hk); hits.push([dx, dy]); }
     if (hits.length > 20000) break;
   }
   const boxes = hits.map(([dx, dy]) => [...W([tb[0] + dx, tb[1] + dy]), ...W([tb[2] + dx, tb[3] + dy])]);
@@ -1983,10 +2012,12 @@ async function saveBytes(name, bytes) {
 function renderImage(d, mode, maxSide) {
   // 生成离屏图像：current = 当前视图；full = 全图
   const v = view(); const sp = d.kind === 'drawing' ? curSpace() : d.space;
+  // 导出总是按图纸本来的方向（不带屏幕旋转/镜像）；当前视图取屏幕四角在图纸上的外包范围
+  const corners = () => { const q = [toLocal(0, 0), toLocal(cv.width, 0), toLocal(cv.width, cv.height), toLocal(0, cv.height)]; return [Math.min(...q.map(x => x[0])), Math.min(...q.map(x => x[1])), Math.max(...q.map(x => x[0])), Math.max(...q.map(x => x[1]))]; };
   let bb;
   if (Array.isArray(mode)) bb = mode;
-  else if (mode === 'current') { const a = toLocal(0, cv.height), b = toLocal(cv.width, 0); bb = [a[0], a[1], b[0], b[1]]; }
-  else { bb = sp.view || sp.bbox; if (sp.paper && sp.viewports.length) { const save = d.views[d.spaceIdx]; zoomExtents(true); const a = toLocal(0, cv.height), b = toLocal(cv.width, 0); bb = [a[0], a[1], b[0], b[1]]; d.views[d.spaceIdx] = save; } }
+  else if (mode === 'current') bb = corners();
+  else { bb = sp.view || sp.bbox; if (sp.paper && sp.viewports.length) { const save = d.views[d.spaceIdx]; zoomExtents(true); bb = corners(); d.views[d.spaceIdx] = save; } }
   const w = bb[2] - bb[0], hgt = bb[3] - bb[1];
   const k = maxSide / Math.max(w, hgt);
   const W0 = Math.max(1, Math.round(w * k)), H0 = Math.max(1, Math.round(hgt * k));
@@ -2001,13 +2032,13 @@ function renderImage(d, mode, maxSide) {
     withTarget(c2, off, dprE, vv, () => drawCompare(d, M, [0, 0, W0, H0]));
   } else if (sp.paper) {
     withTarget(c2, off, dprE, vv, () => drawPaper(d, sp, M, [0, 0, W0, H0]));
-  } else R.drawSpace(c2, sp, M, [0, 0, W0, H0], { dpr: dprE });
+  } else { R.drawSpace(c2, sp, M, [0, 0, W0, H0], { dpr: dprE }); drawXrefs(d, c2, sp, M, [0, 0, W0, H0], dprE); }
   if (d.kind === 'drawing') withTarget(c2, off, dprE, vv, () => drawOverlays(d, M));
   return off;
   function withTarget(c, canvas, dpr, vw, fn) {
-    const oc = ctx, ocv = cv, od = DPR, ov = d.views[d.spaceIdx];
-    ctx = c; cv = canvas; DPR = dpr; d.views[d.spaceIdx] = vw;
-    try { fn(); } finally { ctx = oc; cv = ocv; DPR = od; d.views[d.spaceIdx] = ov; }
+    const oc = ctx, ocv = cv, od = DPR, ov = d.views[d.spaceIdx], orot = d.rot, omir = d.mir;
+    ctx = c; cv = canvas; DPR = dpr; d.views[d.spaceIdx] = vw; d.rot = 0; d.mir = false;
+    try { fn(); } finally { ctx = oc; cv = ocv; DPR = od; d.views[d.spaceIdx] = ov; d.rot = orot; d.mir = omir; }
   }
 }
 async function exportMenu(anchor) {
@@ -2121,7 +2152,7 @@ document.addEventListener('keydown', (e) => {
   else if (c && k.toLowerCase() === 'z' && e.shiftKey) { e.preventDefault(); redo(); }
   else if (c && k.toLowerCase() === 'z') { e.preventDefault(); undo(); }
   else if (c && k.toLowerCase() === 'y') { e.preventDefault(); redo(); }
-  else if (!c && state.tool === 'area' && (k === 'a' || k === 'A')) { state.arcMode = !state.arcMode; state.arcPending = false; toast(state.arcMode ? tr('弧线段：先点弧上一点，再点弧的终点；再按 A 回到直线') : tr('直线段')); redraw(); }
+  else if (!c && state.tool === 'area' && (k === 'a' || k === 'A')) { state.arcMode = !state.arcMode; toast(state.arcMode ? tr('弧线段：先点弧上一点，再点弧的终点；再按 A 回到直线') : tr('直线段')); redraw(); }
   else if (c && k === 'Tab') { e.preventDefault(); if (state.docs.length > 1) { const i = state.docs.indexOf(state.cur); activate(state.docs[(i + (e.shiftKey ? -1 : 1) + state.docs.length) % state.docs.length]); } }
   else if (c && k.toLowerCase() === 'w') { e.preventDefault(); if (state.cur) closeDoc(state.cur); }
   else if (k === 'Escape') { if (state.tmp.length || state.batchSel.length) { state.tmp = []; state.tmpArc = new Set(); state.batchSel = []; state.arcPending = false; state.p2lSeg = null; redraw(); } else setTool(null); $('#menu').classList.add('hidden'); }

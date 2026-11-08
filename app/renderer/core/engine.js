@@ -538,7 +538,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       S.snap(c[0], c[1], 3);
       for (let k = 0; k < 4; k++) { const q = ap(M, r.f(10) + r.f(40) * Math.cos(k * Math.PI / 2), r.f(20) + r.f(40) * Math.sin(k * Math.PI / 2)); S.snap(q[0], q[1], 4); }
       S.circle(c[0], c[1], rr, 0, Math.PI * 2, true);
-      S.curve(s.layer, 2 * Math.PI * rr, arcPoints(r.f(10), r.f(20), r.f(40), 0, Math.PI * 2, 64).map(q => ap(M, q[0], q[1])), null, 'circle');
+      S.curve(s.layer, 2 * Math.PI * rr, arcPoints(r.f(10), r.f(20), r.f(40), 0, Math.PI * 2, 36).map(q => ap(M, q[0], q[1])), null, 'circle');
       { const ring = []; for (let k = 0; k < 720; k++) ring.push(ap(M, r.f(10) + r.f(40) * Math.cos(k * Math.PI / 360), r.f(20) + r.f(40) * Math.sin(k * Math.PI / 360))); S.region(ring); }
       return 0;
     }
@@ -1111,7 +1111,7 @@ export class SceneSink {
     this.samplesX = []; this.samplesY = [];
     this.curves = []; this.layerIds = new Map(); this.inserts = []; this.acc = [];
     // 曲线几何（点选曲线用）：点坐标、每点是否原始顶点、每条曲线的起点/点数/类型
-    this.cpts = []; this.cvf = []; this.cinfo = [];
+    this.cpts = new Float64Array(1 << 16); this.cvf = new Uint8Array(1 << 15); this.np = 0; this.cinfo = [];
   }
   lid(name) { let i = this.layerIds.get(name); if (i === undefined) { i = this.layerIds.size; this.layerIds.set(name, i); } return i; }
   curve(layer, len, pts, vi, kind) {
@@ -1119,13 +1119,13 @@ export class SceneSink {
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
     for (const p of pts) { if (p[0] < a) a = p[0]; if (p[1] < b) b = p[1]; if (p[0] > c) c = p[0]; if (p[1] > d) d = p[1]; }
     this.curves.push(len, a, b, c, d, this.lid(layer));
-    const start = this.cpts.length / 2;
-    if (this.cpts.length < 8e6 && pts.length >= 2) {
-      for (const p of pts) this.cpts.push(p[0], p[1]);
-      const f = new Array(pts.length).fill(0);
-      if (vi) for (const i of vi) { if (i >= 0 && i < f.length) f[i] = 1; } else if (kind === 'line') f.fill(1); else { f[0] = 1; f[f.length - 1] = 1; }
-      for (const x of f) this.cvf.push(x);
-      this.cinfo.push(start, pts.length, CURVE_KIND[kind] || 0);
+    const start = this.np, n = pts.length;
+    if (start + n <= 2e7 && n >= 2) { // 最多 2000 万个点（约 320 MB 以内按需增长）
+      while ((start + n) * 2 > this.cpts.length) { const a = new Float64Array(this.cpts.length * 2); a.set(this.cpts); this.cpts = a; const b = new Uint8Array(this.cvf.length * 2); b.set(this.cvf); this.cvf = b; }
+      for (let k = 0; k < n; k++) { this.cpts[(start + k) * 2] = pts[k][0]; this.cpts[(start + k) * 2 + 1] = pts[k][1]; }
+      if (vi) { for (const i of vi) if (i >= 0 && i < n) this.cvf[start + i] = 1; } else if (kind === 'line') this.cvf.fill(1, start, start + n); else { this.cvf[start] = 1; this.cvf[start + n - 1] = 1; }
+      this.np += n;
+      this.cinfo.push(start, n, CURVE_KIND[kind] || 0);
     } else this.cinfo.push(start, 0, 0);
   }
   beginInsert() { const a = [Infinity, Infinity, -Infinity, -Infinity]; this.acc.push(a); return a; }
@@ -1180,7 +1180,7 @@ export class SceneSink {
       batches, fills, texts: this.texts,
       snaps: Float64Array.from(this.snaps), circles: Float64Array.from(this.circles), segs: Float64Array.from(this.segs),
       regions: this.regions.map(g => ({ rings: g.rings.map(r => Float64Array.from(r)), l: g.l, hatch: g.hatch || 0 })),
-      curves: Float64Array.from(this.curves), cpts: Float64Array.from(this.cpts), cvf: Uint8Array.from(this.cvf), cinfo: Uint32Array.from(this.cinfo), curveLayers: [...this.layerIds.keys()], inserts: this.inserts,
+      curves: Float64Array.from(this.curves), cpts: this.cpts.slice(0, this.np * 2), cvf: this.cvf.slice(0, this.np), cinfo: Uint32Array.from(this.cinfo), curveLayers: [...this.layerIds.keys()], inserts: this.inserts,
       bbox: this.bb, view: smartExtents(this.bb, this.samplesX, this.samplesY),
     };
   }

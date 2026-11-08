@@ -9,7 +9,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 - New measuring tools: linear (horizontal/vertical), point-to-line distance, arc/curve length, per-segment lengths of a polyline, batch lengths of picked lines, stationing at a fixed interval (K0+020 style), rectangle area, area with arc segments (press A), side area (length × height) and circle (radius, diameter, circumference, area).
 - Find Shapes: box-select a sample and count identical shapes even when they are not blocks (moved copies; rotated or mirrored copies are not counted).
 - Markup Style: text size, colour, dimension ends and decimals; Hide Markups; Redo (Ctrl+Y).
-- Rotate View in 90° steps and Mirror View.
+- Rotate View in 90° steps and Mirror View. Export and print always use the drawing's own orientation.
 - External references: loaded automatically from the recorded path or the drawing's folder, listed under Tools → Xrefs, and a missing file can be chosen by hand.
 - Layout → Model: export the current layout, including clipped viewport contents, as a flat model-space DXF.
 
