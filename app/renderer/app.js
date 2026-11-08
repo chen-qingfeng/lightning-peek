@@ -203,6 +203,7 @@ function resetToolState() { state.tmp = []; state.tmpArc = new Set(); state.arcP
 function setTool(t) {
   if (t && t !== 'calib' && t !== 'findbox') { const ti = tabOf(t); if (ti >= 0 && ti !== state.tab) { state.tab = ti; buildToolbar(); } }
   state.tool = t; resetToolState(); state.hover = null; state.arcMode = false;
+  if (t === 'count' && state.side !== 'blocks' && state.cur && state.cur.kind === 'drawing') { state.side = 'blocks'; refreshSide(); } // 数量统计：同时列出全部图块
   cv.className = t ? (PICK_TOOLS.has(t) ? 'pick' : 'cross') : 'pan';
   $('#st-tool').textContent = t ? '▶ ' + (TOOL_HINT[t] || '') + tr('　Esc 退出') : '';
   hideTip(); refreshToolbar(); redraw();
@@ -1106,9 +1107,12 @@ function boxLength(a, b) {
   }
   return { total, n, layers: [...lays] };
 }
+// 能参与数量统计的图块：普通块和按内容分组的匿名块（*ANON），不含标注、填充等内部块
+function countable(n) { return /^\*ANON/.test(n) || (!/^\*/.test(n) && !/^A\$/.test(n)); }
+function blockLabel(n) { return /^\*ANON\d+$/.test(n) ? tr('匿名块 {0}', n.slice(5)) : n; }
 function findInsert(p) {
   const sp = curSpace(); let best = null, ba = Infinity;
-  for (const it of sp.inserts || []) { if (!layerVisible(sp, it.l)) continue; const b = it.b; if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue; const a = (b[2] - b[0]) * (b[3] - b[1]); if (a < ba && /^[^*]/.test(it.n) && !/^A\$|^\*/.test(it.n) || (a < ba && !best)) { ba = a; best = it; } }
+  for (const it of sp.inserts || []) { if (!layerVisible(sp, it.l)) continue; const b = it.b; if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue; const a = (b[2] - b[0]) * (b[3] - b[1]); if (a < ba && countable(it.n) || (a < ba && !best)) { ba = a; best = it; } }
   return best;
 }
 function textBox(t) {
@@ -1448,10 +1452,13 @@ async function toolClick(p, screen) {
       break;
     case 'count': {
       const it = findInsert(toLocal(...screen));
-      if (!it) { toast(tr('这里没有图块。数量统计针对图块（块参照）')); break; }
+      if (!it || !countable(it.n)) { // 不是图块：自动改用图形识别，以点中的图形为样板
+        if (!autoShapeAt(toLocal(...screen))) toast(tr('这里没有图块，也没有可以作为样板的图形'));
+        break;
+      }
       const sp0 = curSpace(); const same = (sp0.inserts || []).filter(x => x.n === it.n && layerVisible(sp0, x.l));
-      addItem('m', { type: 'count', ts: tsNow(), lo: loNow(), name: it.n, n: same.length, pts: [W(p)], boxes: same.slice(0, 5000).map(x => [...W([x.b[0], x.b[1]]), ...W([x.b[2], x.b[3]])]), cat: d.cat });
-      toast(tr('图块「{0}」共 {1} 个', it.n, same.length));
+      addItem('m', { type: 'count', ts: tsNow(), lo: loNow(), name: blockLabel(it.n), block: it.n, n: same.length, pts: [W(p)], boxes: same.slice(0, 5000).map(x => [...W([x.b[0], x.b[1]]), ...W([x.b[2], x.b[3]])]), cat: d.cat });
+      toast(tr('图块「{0}」共 {1} 个', blockLabel(it.n), same.length)); if (state.side === 'blocks') refreshSide();
       break;
     }
     case 'line': state.tmp.push(p); if (state.tmp.length === 2) { const pts = state.tmp.map(W); state.tmp = []; addItem('a', { type: 'line', pts }); } break;
@@ -1498,6 +1505,67 @@ async function editAnnotText(a) {
   const r = await ask(tr('修改批注'), [{ key: 't', label: tr('内容（清空则删除）'), type: 'textarea', value: a.text || '' }]);
   if (!r) return;
   if (!r.t.trim() && a.type === 'text') removeItem('a', a); else { pushUndo(state.cur, { op: 'props', item: a, old: { text: a.text } }); a.text = r.t.trim(); saveSidecar(state.cur); redraw(); }
+}
+
+// 点中的不是图块：取点击处最小的封闭图形（圆、闭合多段线）为样板；没有就取点中的那条线
+function autoShapeAt(p) {
+  const sp = curSpace(); const c = sp.curves; if (!c) return false;
+  const v = view(); const lim = Math.min(cv.width, cv.height) / v.s * 0.25; // 样板不超过屏幕的四分之一
+  let best = null, ba = Infinity;
+  for (let i = 0, ci = 0; i < c.length; i += 6, ci++) {
+    if (p[0] < c[i + 1] || p[0] > c[i + 3] || p[1] < c[i + 2] || p[1] > c[i + 4]) continue;
+    const w = c[i + 3] - c[i + 1], h = c[i + 4] - c[i + 2]; if (Math.max(w, h) > lim || !layerVisible(sp, c[i + 5])) continue;
+    const k = sp.cinfo ? sp.cinfo[ci * 3 + 2] : 0; const n = sp.cinfo ? sp.cinfo[ci * 3 + 1] : 0; const s0 = sp.cinfo ? sp.cinfo[ci * 3] : 0;
+    const closed = k === 3 || (n > 2 && sp.cpts && Math.hypot(sp.cpts[s0 * 2] - sp.cpts[(s0 + n - 1) * 2], sp.cpts[s0 * 2 + 1] - sp.cpts[(s0 + n - 1) * 2 + 1]) < 1e-9 * (1 + w + h) + 1e-9);
+    if (!closed) continue;
+    const a = w * h; if (a < ba) { ba = a; best = [c[i + 1], c[i + 2], c[i + 3], c[i + 4]]; }
+  }
+  if (!best) { const hc = pickCurve(p); if (hc) { const i = hc.ci * 6; if (Math.max(c[i + 3] - c[i + 1], c[i + 4] - c[i + 2]) <= lim) best = [c[i + 1], c[i + 2], c[i + 3], c[i + 4]]; } }
+  if (!best) return false;
+  const e = Math.max(best[2] - best[0], best[3] - best[1]) * 0.02 + 1e-9;
+  findShapes([best[0] - e, best[1] - e], [best[2] + e, best[3] + e]);
+  return true;
+}
+// ---------------- 图块统计面板：自动列出当前空间的全部图块及数量 ----------------
+function blockStats(sp) {
+  const m = new Map();
+  for (const it of sp.inserts || []) {
+    if (!countable(it.n) || !layerVisible(sp, it.l)) continue;
+    let g = m.get(it.n); if (!g) m.set(it.n, g = { n: it.n, items: [], layers: new Set() });
+    g.items.push(it); g.layers.add(sp.curveLayers[it.l]);
+  }
+  return [...m.values()].sort((a, b) => b.items.length - a.items.length);
+}
+function blocksPanel(body, d) {
+  if (d.kind !== 'drawing') { body.innerHTML = `<div class="empty-note">${tr('对比视图里不统计图块')}</div>`; return; }
+  const sp = curSpace(); const list = blockStats(sp);
+  const total = list.reduce((a, g) => a + g.items.length, 0);
+  const filter = h('input', { type: 'text', placeholder: tr('按名称筛选') });
+  const box = h('div');
+  const render = () => {
+    box.innerHTML = ''; const q = filter.value.trim().toLowerCase();
+    for (const g of list) {
+      const name = blockLabel(g.n); if (q && !name.toLowerCase().includes(q)) continue;
+      box.append(h('div', { cls: 'mrow', style: 'display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid #e6e9ee' },
+        h('div', { style: 'flex:1;min-width:0' }, h('div', { style: 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis', text: name, title: name }), h('div', { style: 'color:#7a8594;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis', text: [...g.layers].join('、') })),
+        h('b', { style: 'min-width:42px;text-align:right', text: String(g.items.length) }),
+        h('button', { cls: 'btn', text: tr('标出'), title: tr('在图上框出全部位置，并记入测量统计'), onclick: () => {
+          const bb = [Infinity, Infinity, -Infinity, -Infinity]; for (const it of g.items) { bb[0] = Math.min(bb[0], it.b[0]); bb[1] = Math.min(bb[1], it.b[1]); bb[2] = Math.max(bb[2], it.b[2]); bb[3] = Math.max(bb[3], it.b[3]); }
+          addItem('m', { type: 'count', ts: tsNow(), lo: loNow(), name: blockLabel(g.n), block: g.n, n: g.items.length, pts: [W([g.items[0].b[2], g.items[0].b[3]])], boxes: g.items.slice(0, 5000).map(x => [...W([x.b[0], x.b[1]]), ...W([x.b[2], x.b[3]])]), cat: d.cat });
+          const w = Math.max(bb[2] - bb[0], bb[3] - bb[1]) * 0.05; zoomTo([bb[0] - w, bb[1] - w, bb[2] + w, bb[3] + w], 20);
+        } })));
+    }
+    if (!box.childNodes.length) box.append(h('div', { cls: 'empty-note', text: list.length ? tr('没有匹配的图块') : tr('当前空间没有可见的图块。不是图块的符号，可以用「图形识别」或直接点它统计。') }));
+  };
+  filter.oninput = render;
+  body.append(
+    h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;margin-bottom:6px', text: tr('{0} 种图块，共 {1} 个（只统计打开的图层；动态块等匿名块按内容相同归为一类）。在图上单击一个图块可直接统计；单击的不是图块时，自动按图形识别。', list.length, total) }),
+    h('div', { cls: 'row', style: 'margin-bottom:8px;gap:6px' }, h('button', { cls: 'btn primary', text: tr('导出 Excel'), onclick: () => {
+      const rows = [[tr('图块名称'), tr('数量'), tr('图层')]]; for (const g of list) rows.push([blockLabel(g.n), g.items.length, [...g.layers].join('、')]);
+      saveBytes(baseName(d) + tr('_图块清单.xlsx'), makeXlsx([{ name: tr('图块清单'), rows, widths: [36, 10, 40] }]));
+    } })),
+    filter, h('div', { style: 'height:6px' }), box);
+  render();
 }
 
 // ---------------- 图形识别：统计与样板相同的图形（非图块的散线也能数） ----------------
@@ -1605,6 +1673,33 @@ async function saveDxf(d, bb) {
   } catch (e) { busy(); toast(tr('导出失败：') + e.message); }
 }
 
+// 另存为 DWG：先生成 DXF（含文字修改），再交给本机安装的 ODA File Converter 转成 DWG
+async function saveDwg(d) {
+  if (!B.saveDwg) { toast(tr('另存为 DWG 只在桌面版里可用')); return; }
+  const r = await ask(tr('另存为 DWG'), [{ key: 'ver', label: tr('DWG 版本（版本越低，能打开的 CAD 越多）'), type: 'select', value: state.settings.dwgVer || 'ACAD2013', options: [['ACAD2018', 'AutoCAD 2018'], ['ACAD2013', 'AutoCAD 2013'], ['ACAD2010', 'AutoCAD 2010'], ['ACAD2007', 'AutoCAD 2007'], ['ACAD2004', 'AutoCAD 2004'], ['ACAD2000', 'AutoCAD 2000']] }]);
+  if (!r) return;
+  state.settings.dwgVer = r.ver; saveSettings();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    busy(tr('正在生成 DWG…'));
+    let res;
+    try {
+      const m = await rpc({ cmd: 'dxf', doc: d.id, edits: d.textEdits, bbox: null });
+      res = await B.saveDwg(baseName(d) + tr('_另存') + '.dwg', new Uint8Array(m.bytes), r.ver);
+      busy();
+      if (res && res.ok) { toast(tr('已另存为 DWG：{0}', res.path) + (m.dropped ? tr('（{0} 个天正/专业软件自定义对象无法转换，已略去）', m.dropped) : ''), 7000); return; }
+    } catch (e) { busy(); toast(tr('导出失败：') + (e.message || e)); return; }
+    if (!res || res.canceled) return;
+    if (res.error) { toast(tr('转换失败：') + res.error, 8000); return; }
+    if (res.need) {
+      const c = await ask(tr('需要 ODA File Converter'), [{ key: 'a', label: tr('另存 DWG 要用到免费的 ODA File Converter（由开放设计联盟提供，本软件不能自带）。装好后闪电看图会自动找到它。'), type: 'select', value: 'dl', options: [['dl', tr('打开下载页面')], ['pick', tr('我已经装好了，手动指定 ODAFileConverter.exe')], ['dxf', tr('先另存为 DXF（CAD 都能打开）')]] }]);
+      if (!c) return;
+      if (c.a === 'dl') { B.odaPage(); toast(tr('下载安装后，再点一次「另存为 DWG」'), 6000); return; }
+      if (c.a === 'dxf') { saveDxf(d, null); return; }
+      if (!(await B.odaPick())) { toast(tr('没有选中 ODAFileConverter.exe')); return; }
+    }
+  }
+}
+
 // ---------------- 比例 ----------------
 function updateScaleInfo() {
   const d = state.cur;
@@ -1658,7 +1753,7 @@ function refreshSide() {
   requestAnimationFrame(() => { sizeCanvas(); redraw(); });
   if (!id) return;
   const d = state.cur;
-  $('#side-title').textContent = { layers: tr('图层'), stats: tr('测量统计'), find: tr('文字查找'), compare: tr('图纸对比'), help: tr('帮助与快捷键'), oles: tr('嵌入表格（OLE）'), xref: tr('外部参照') }[id];
+  $('#side-title').textContent = { layers: tr('图层'), stats: tr('测量统计'), find: tr('文字查找'), compare: tr('图纸对比'), help: tr('帮助与快捷键'), oles: tr('嵌入表格（OLE）'), xref: tr('外部参照'), blocks: tr('图块统计') }[id];
   body.innerHTML = '';
   if (id === 'help') return helpPanel(body);
   if (!d) { body.innerHTML = `<div class="empty-note">${tr('先打开一张图纸')}</div>`; return; }
@@ -1668,6 +1763,7 @@ function refreshSide() {
   else if (id === 'compare') comparePanel(body, d);
   else if (id === 'oles') olePanel(body, d);
   else if (id === 'xref') xrefPanel(body, d);
+  else if (id === 'blocks') blocksPanel(body, d);
 }
 // 图纸里嵌入的 OLE 对象（多为设计院附的 Excel 工程量表）：定位查看，或把原始 Excel 文件另存出来
 function olePanel(body, d) {
@@ -1775,9 +1871,9 @@ function statsPanel(body, d) {
 }
 function blockList(d) {
   const sp = curSpace(); const cnt = new Map();
-  for (const it of sp.inserts || []) cnt.set(it.n, (cnt.get(it.n) || 0) + 1);
+  for (const it of sp.inserts || []) if (countable(it.n) && layerVisible(sp, it.l)) cnt.set(it.n, (cnt.get(it.n) || 0) + 1);
   if (!cnt.size) { toast(tr('当前空间没有图块')); return; }
-  const rows = [[tr('图块名称'), tr('数量')]]; [...cnt].sort((a, b) => b[1] - a[1]).forEach(([n, c]) => rows.push([n, c]));
+  const rows = [[tr('图块名称'), tr('数量')]]; [...cnt].sort((a, b) => b[1] - a[1]).forEach(([n, c]) => rows.push([blockLabel(n), c]));
   saveBytes(baseName(d) + tr('_图块清单.xlsx'), makeXlsx([{ name: tr('图块清单'), rows, widths: [40, 10] }]));
 }
 function locateMeasure(m) {
@@ -1950,6 +2046,7 @@ function helpPanel(body) {
     try { sessionStorage.setItem('lpeek.reopen', JSON.stringify(state.docs.filter(d => d.kind === 'drawing' && d.path).map(d => d.path))); } catch (e) { /* 忽略 */ }
     location.reload();
   };
+  if (B.openGuide) body.append(h('button', { cls: 'btn primary', style: 'width:100%;margin-bottom:12px', text: tr('打开使用说明（PDF）'), onclick: async () => { const r = await B.openGuide(); if (r) toast(tr('无法打开使用说明：') + r); } }));
   body.append(h('label', { style: 'display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12px;color:#5b6676' }, tr('界面语言（切换后界面会重新加载）'), sel));
   const keys = [[tr('滚轮'), tr('以光标为中心缩放')], [tr('左键拖动 / 中键拖动'), tr('平移')], [tr('Home / 双击中键'), tr('全图')], ['W', tr('窗口缩放')], [tr('右键 / 回车'), tr('结束连续测量、面积')], ['Esc', tr('退出当前工具')], ['F3', tr('对象捕捉开关')], ['F8', tr('正交开关')], ['Ctrl+Z', tr('撤销')], ['Ctrl+O', tr('打开')], ['Ctrl+F', tr('文字查找')], ['Ctrl+P', tr('打印')], ['Ctrl+Tab', tr('切换图纸')]];
   const t = h('table', { cls: 'keys' }); for (const [k, v] of keys.filter(x => !/^1 ~ 7|^W$/.test(x[0]))) t.append(h('tr', {}, h('td', {}, h('span', { cls: 'kbd', text: k })), h('td', { text: v })));
@@ -2050,7 +2147,7 @@ async function exportMenu(anchor) {
     [tr('导出 PDF（全图，A3）'), () => exportPdf(d, 'full')],
     [tr('导出 PDF（当前视图，A3）'), () => exportPdf(d, 'current')],
   ];
-  if (d.kind === 'drawing') items.push(null, [tr('另存为 DXF（含文字修改，原图不变）'), () => saveDxf(d, null)], [tr('导出测量统计 Excel'), () => exportXlsx(d)], null, [tr('导出标注文件（发给同事）'), () => exportMarks(d)], [tr('导入标注文件'), () => importMarks(d)]);
+  if (d.kind === 'drawing') items.push(null, [tr('另存为 DWG（含文字修改，原图不变）'), () => saveDwg(d)], [tr('另存为 DXF（含文字修改，原图不变）'), () => saveDxf(d, null)], [tr('导出测量统计 Excel'), () => exportXlsx(d)], null, [tr('导出标注文件（发给同事）'), () => exportMarks(d)], [tr('导入标注文件'), () => importMarks(d)]);
   showMenu(anchor, items);
 }
 async function exportPng(d, mode) {

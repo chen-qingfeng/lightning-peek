@@ -6,12 +6,17 @@ const queued = [];
 ipcRenderer.on('open-file', (e, p) => { if (openCb) openCb(p); else queued.push(p); });
 
 contextBridge.exposeInMainWorld('sdkt', {
-  version: '0.1.3',
+  version: '0.1.4',
   openDialog: (opt) => ipcRenderer.invoke('open-dialog', opt || {}),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   readText: (p) => ipcRenderer.invoke('read-text', p),
   writeText: (p, t) => ipcRenderer.invoke('write-text', p, t),
   writeTextSync: (p, t) => ipcRenderer.sendSync('write-text-sync', p, t),
+  openGuide: () => ipcRenderer.invoke('open-guide'),
+  saveDwg: (name, bytes, ver) => ipcRenderer.invoke('save-dwg', name, bytes, ver),
+  odaFind: () => ipcRenderer.invoke('oda-find'),
+  odaPick: () => ipcRenderer.invoke('oda-pick'),
+  odaPage: () => ipcRenderer.invoke('oda-page'),
   openAny: (opt) => ipcRenderer.invoke('open-any', opt || {}),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSettings: (s) => ipcRenderer.invoke('set-settings', s),

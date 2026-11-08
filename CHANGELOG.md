@@ -2,7 +2,20 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
-## [0.1.3] – Preview – unreleased
+## [0.1.4] – Preview – unreleased
+
+### Added
+- Single-file portable build (`LightningPeek-<version>-portable.exe`): double-click to run, nothing is installed. The first start unpacks the program to `%LOCALAPPDATA%\LightningPeek` (about half a minute); later starts are immediate.
+- Save as DWG (AutoCAD 2000–2018), including text edits, through the free ODA File Converter if it is installed. The app finds it automatically or lets you choose it, and offers the download page or Save as DXF otherwise.
+- User guide in Chinese (`docs/user-guide.zh-CN.md`, also as a PDF), opened from Help.
+- Block Counts panel: clicking Count lists every block in the current space with its count; Mark boxes all instances; export to Excel.
+
+### Changed
+- Anonymous blocks (such as each state of a dynamic block) with identical content are counted as one kind instead of one each.
+- Clicking something that is not a block with the Count tool now counts identical shapes instead of showing an error.
+- Releases ship as two single files (portable exe and installer) plus the user guide; the zip is no longer attached.
+
+## [0.1.3] – Preview – 2026-11-08
 
 ### Added
 - Measurements are drawn like CAD dimensions: aligned and linear dimensions with extension lines and ticks (or arrows), and leaders for areas, radii, coordinates and counts. Labels can be dragged; dragging a dimension label moves the dimension line.

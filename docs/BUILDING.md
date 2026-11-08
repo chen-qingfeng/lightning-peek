@@ -59,6 +59,18 @@ The script:
 3. Replaces the exe icon and version information with `build/pe_patch.py`. This edits resources in place; the result is not code-signed.
 4. Copies `app/` to `resources/app/`, adds licenses, notices, `README.txt` and the right-click menu scripts.
 
+## Single-file portable exe
+
+```sh
+npm run pack:portable
+```
+
+Builds `dist/LightningPeek-<version>-portable.exe` with NSIS 3 (`build/portable.nsi`). It is a silent launcher: on the first start of a version it unpacks the program to `%LOCALAPPDATA%\LightningPeek\runtime-<version>` (showing a "preparing" notice), removes older runtimes, and then starts `LightningPeek.exe` with the same command-line arguments. Later starts skip the unpacking.
+
+## User guide PDF
+
+`docs/user-guide.zh-CN.md` is the source. `python3 tools/guide2pdf.py docs/user-guide.zh-CN.md guide.html` turns it into HTML; print that page to A4 PDF with Chromium (for example Playwright's `page.pdf`) and copy the result to `app/guide.pdf`, which **Help → Open the user guide** opens.
+
 ## Windows installer
 
 ```sh

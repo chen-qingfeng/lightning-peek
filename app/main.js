@@ -3,10 +3,11 @@ const { app, BrowserWindow, ipcMain, dialog, protocol, Menu, shell } = require('
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const { execFile } = require('child_process');
 
 const APP_NAME = '闪电看图';
 let LANG = 'zh';
-const EN = { '打开图纸': 'Open drawing', '选择要对比的新图纸': 'Choose the new drawing to compare', 'CAD 图纸': 'CAD drawings', '所有文件': 'All files', '保存': 'Save', 'Excel 工作簿': 'Excel workbook', 'PNG 图片': 'PNG image', 'PDF 文档': 'PDF document', '导出 PDF': 'Export PDF', '选择文件': 'Choose a file', '文件': 'Files', '只能打开 DWG / DXF 文件': 'Only DWG and DXF files can be opened', '文件超过 400MB': 'The file is larger than 400 MB', '不允许写入该位置': 'Writing to this location is not allowed', '闪电看图': 'Lightning Peek' };
+const EN = { '选择 ODAFileConverter.exe': 'Choose ODAFileConverter.exe', '另存为 DWG': 'Save as DWG', '转换器没有生成 DWG 文件': 'The converter did not produce a DWG file', '打开图纸': 'Open drawing', '选择要对比的新图纸': 'Choose the new drawing to compare', 'CAD 图纸': 'CAD drawings', '所有文件': 'All files', '保存': 'Save', 'Excel 工作簿': 'Excel workbook', 'PNG 图片': 'PNG image', 'PDF 文档': 'PDF document', '导出 PDF': 'Export PDF', '选择文件': 'Choose a file', '文件': 'Files', '只能打开 DWG / DXF 文件': 'Only DWG and DXF files can be opened', '文件超过 400MB': 'The file is larger than 400 MB', '不允许写入该位置': 'Writing to this location is not allowed', '闪电看图': 'Lightning Peek' };
 const tm = (s) => (LANG === 'en' ? EN[s] || s : s);
 const ROOT = path.join(__dirname, 'renderer');
 
@@ -141,6 +142,59 @@ ipcMain.handle('save-bytes', async (e, name, bytes) => {
   return r.filePath;
 });
 ipcMain.handle('reveal', (e, p) => { if (isDrawing(p) || isMarks(p)) shell.showItemInFolder(p); });
+
+// ---- 另存为 DWG：交给用户自己安装的 ODA File Converter（免费工具，不随本软件分发）----
+const ODA_URL = 'https://www.opendesign.com/guestfiles/oda_file_converter';
+const ODA_VERS = ['ACAD2018', 'ACAD2013', 'ACAD2010', 'ACAD2007', 'ACAD2004', 'ACAD2000'];
+function findOda() {
+  const s = loadSettings();
+  if (process.env.LPEEK_ODA && fs.existsSync(process.env.LPEEK_ODA)) return process.env.LPEEK_ODA; // 测试用
+  if (s.odaPath && fs.existsSync(s.odaPath)) return s.odaPath;
+  const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432, process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')].filter(Boolean);
+  const found = [];
+  for (const r of [...new Set(roots)]) {
+    const oda = path.join(r, 'ODA');
+    let subs = []; try { subs = fs.readdirSync(oda); } catch (e) { continue; }
+    for (const d of subs) { const exe = path.join(oda, d, 'ODAFileConverter.exe'); if (/^ODAFileConverter/i.test(d) && fs.existsSync(exe)) found.push(exe); }
+  }
+  // 版本号大的优先
+  found.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  return found[0] || '';
+}
+ipcMain.handle('oda-find', () => findOda());
+// 打开随程序附带的使用说明（PDF，用系统默认的 PDF 阅读器）；返回空串表示成功
+ipcMain.handle('open-guide', () => shell.openPath(path.join(__dirname, 'guide.pdf')));
+ipcMain.handle('oda-page', () => shell.openExternal(ODA_URL));
+ipcMain.handle('oda-pick', async () => {
+  const r = await dialog.showOpenDialog(win, { title: tm('选择 ODAFileConverter.exe'), properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'ODAFileConverter', extensions: ['exe'] }] : [] });
+  const p = r.filePaths && r.filePaths[0];
+  if (!p || (process.platform === 'win32' && !/^ODAFileConverter.*\.exe$/i.test(path.basename(p)))) return '';
+  const s = loadSettings(); s.odaPath = p; saveSettings(s); return p;
+});
+ipcMain.handle('save-dwg', async (e, name, dxfBytes, ver) => {
+  const exe = findOda(); if (!exe) return { need: true };
+  if (!ODA_VERS.includes(ver)) ver = 'ACAD2013';
+  const s = loadSettings();
+  const r = await dialog.showSaveDialog(win, { title: tm('另存为 DWG'), defaultPath: path.join(s.lastSaveDir || s.lastDir || app.getPath('documents'), name), filters: [{ name: 'DWG', extensions: ['dwg'] }] });
+  if (r.canceled || !r.filePath) return { canceled: true };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sdkt-dwg-'));
+  const inDir = path.join(tmp, 'in'), outDir = path.join(tmp, 'out');
+  fs.mkdirSync(inDir); fs.mkdirSync(outDir);
+  try {
+    await fs.promises.writeFile(path.join(inDir, 'drawing.dxf'), Buffer.from(dxfBytes));
+    // 参数：输入目录 输出目录 版本 类型 递归 审核 过滤
+    const out = await new Promise((resolve) => execFile(exe, [inDir, outDir, ver, 'DWG', '0', '1', '*.DXF'], { timeout: 10 * 60 * 1000, windowsHide: true }, (err, so, se) => resolve({ err, so, se })));
+    const dwg = fs.readdirSync(outDir).find(f => /\.dwg$/i.test(f));
+    if (!dwg) {
+      const errf = fs.readdirSync(outDir).find(f => /\.err$/i.test(f));
+      const msg = errf ? fs.readFileSync(path.join(outDir, errf), 'utf8').slice(0, 400) : (out.err ? String(out.err.message || out.err) : '');
+      return { error: msg || tm('转换器没有生成 DWG 文件') };
+    }
+    await fs.promises.copyFile(path.join(outDir, dwg), r.filePath);
+    s.lastSaveDir = path.dirname(r.filePath); saveSettings(s);
+    return { ok: true, path: r.filePath };
+  } finally { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (err) { /* 忽略 */ } }
+});
 
 // 把一张大图放进一页 A3，再导出 PDF 或交给系统打印
 async function pageWindow(dataUrl, landscape) {

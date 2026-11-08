@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.1.3 preview</b> (Windows 10 / 11, 64-bit)</p>
+<p align="center"><b>Current version: v0.1.4 preview</b> (Windows 10 / 11, 64-bit)</p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 
@@ -42,13 +42,13 @@ This is a preview. It has been checked on a limited set of drawings (see [Suppor
 | Drafting and editing | It is a viewer, not a CAD editor |
 | BIM and 3D modelling | It stays 2D and lightweight |
 | Precise quantity take-off | It is for quick rough checks, not a replacement for professional estimating software |
-| Changing the original drawing | Read-only; text edits can only be saved as a new DXF |
+| Changing the original drawing | Read-only; text edits can only be saved as a new DXF or DWG |
 
 > Measurements are for quick checks and rough quantities. They depend on how accurately the drawing was drawn and on the scale setting, and do not replace formal quantity take-off.
 
 ## Problems it addresses
 
-| Problem | What v0.1.3 does |
+| Problem | What v0.1.4 does |
 | --- | --- |
 | Starting a large CAD package just to look at a drawing | Portable app, no installation |
 | Messy layers | Layer on/off, search and isolate |
@@ -62,12 +62,13 @@ The full plan — layer classification, drawing checks, natural-language queries
 ## Install and first use
 
 1. From [Releases](https://github.com/chen-qingfeng/lightning-peek/releases), download either:
-   - **Installer** `LightningPeek-0.1.3-setup-x64.exe`: installs for the current user (no administrator rights), adds a desktop icon and a Start menu entry, can add Lightning Peek to **Open with** for DWG/DXF, and can be removed from **Settings → Apps**. Your settings and markups are kept in `%APPDATA%\闪电看图`.
-   - **Portable** `LightningPeek-0.1.3-win-x64.zip`: unzip anywhere, for example `D:\Tools\LightningPeek`. Settings are stored in the `data` folder next to the program.
-2. Start Lightning Peek from the desktop icon, or double-click `LightningPeek.exe` in the portable folder.
+   - **Portable** `LightningPeek-0.1.4-portable.exe`: a single file. Double-click to run; nothing is installed. The first start takes about half a minute to unpack, later starts are immediate.
+   - **Installer** `LightningPeek-0.1.4-setup-x64.exe`: installs for the current user (no administrator rights), adds a desktop icon and a Start menu entry, can add Lightning Peek to **Open with** for DWG/DXF, and can be removed from **Settings → Apps**. Your settings and markups are kept in `%APPDATA%\闪电看图`.
+   Settings and markups of both are kept in `%APPDATA%\闪电看图`.
+2. Start Lightning Peek from the desktop icon or the portable exe. A step-by-step user guide (Chinese) is in [docs/user-guide.zh-CN.md](docs/user-guide.zh-CN.md) and under **Help → Open the user guide**.
    Windows SmartScreen may warn that the app is from an unknown publisher, because the preview is not code-signed. Choose **More info → Run anyway** only if you downloaded it from this repository's Releases page.
 3. Click **Open** or drag a `.dwg` / `.dxf` file into the window.
-4. Portable build, optional: run `add-context-menu.bat` to get **Open with Lightning Peek** when you right-click a drawing. `remove-context-menu.bat` removes it.
+4. The installer can add Lightning Peek to **Open with** for DWG/DXF files.
 
 The interface follows the Windows display language (Chinese or English). You can switch it under **Help → Interface language**.
 
@@ -97,7 +98,7 @@ Tool shortcuts (default): `1` Length · `2` Polyline · `3` Area · `4` Pick are
 | DXF (binary) | Not supported. |
 | Export | PNG, PDF (A3), Excel (measurements, find results, tables, comparison report), DXF (copy with your text edits). DWG cannot be written. |
 
-Known limitations in v0.1.3:
+Known limitations in v0.1.4:
 
 - SHX fonts are drawn with system fonts (FangSong, SimSun and similar), so text width can differ slightly from AutoCAD.
 - Custom objects from vertical software (for example TArch walls and doors) are not shown unless the drawing was exported to plain entities (“T3” format).
@@ -111,7 +112,7 @@ The full list of supported entities is in [docs/FORMATS.md](docs/FORMATS.md).
 ## Privacy and your files
 
 - Lightning Peek does not connect to the internet and collects no data.
-- The original drawing is never modified. Text edits are written only to a new DXF file that you save yourself.
+- The original drawing is never modified. Text edits are written only to a new DXF or DWG file that you save yourself.
 - Measurements and markups are stored next to the drawing as `<drawing>.lpeek.json` once you add one.
 - Settings, the recent-files list and the browser cache are stored in the `data` folder next to `LightningPeek.exe`.
 - PDF export and printing create a temporary page in the system temp folder and delete it afterwards.
@@ -130,6 +131,7 @@ npm start            # runs the app from source
 npm test             # unit tests (no extra dependencies)
 npm run pack:win     # builds dist/LightningPeek-<version>-win-x64.zip
 npm run pack:setup   # builds dist/LightningPeek-<version>-setup-x64.exe (needs NSIS 3)
+npm run pack:portable  # builds dist/LightningPeek-<version>-portable.exe (needs NSIS 3)
 ```
 
 See [docs/BUILDING.md](docs/BUILDING.md) for how the package is assembled and how the project is laid out.

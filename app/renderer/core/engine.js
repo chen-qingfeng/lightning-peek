@@ -770,6 +770,30 @@ function polySnaps(S, M, verts, flat, closed) {
   for (let k = 0; k < flat.length - 1; k++) S.seg(flat[k][0], flat[k][1], flat[k + 1][0], flat[k + 1][1]);
 }
 
+// 统计用的图块名：普通块用块名；*U 匿名块（动态块的每种状态都会生成一个）按块内容分组，
+// 内容相同的算同一种，名字记作 *ANON<序号>；其余以 * 开头的（标注、填充等内部块）原样返回
+const SKIP_CODES = new Set([5, 102, 100, 330, 331, 340, 350, 360]);
+function countName(doc, blk) {
+  if (!/^\*U/i.test(blk.name)) return blk.name;
+  const cache = doc._anon || (doc._anon = { byBlk: new Map(), bySig: new Map() });
+  let n = cache.byBlk.get(blk);
+  if (n) return n;
+  let h = 2166136261;
+  const add = (str) => { for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } h ^= 124; h = Math.imul(h, 16777619); };
+  for (const r of blk.ents) {
+    add(r.type);
+    for (let i = 0; i < r.c.length; i++) {
+      const c = r.c[i]; if (SKIP_CODES.has(c) || c >= 1000) continue;
+      const v = r.v[i].trim(); const x = parseFloat(v);
+      add(c + '=' + (Number.isFinite(x) && /^-?[\d.]/.test(v) ? x.toFixed(3) : v));
+    }
+  }
+  const sig = (h >>> 0).toString(36) + ':' + blk.ents.length;
+  n = cache.bySig.get(sig);
+  if (!n) { n = '*ANON' + (cache.bySig.size + 1); cache.bySig.set(sig, n); }
+  cache.byBlk.set(blk, n);
+  return n;
+}
 function emitInsert(ctx, r, m, inh, attribs) {
   const bn = r.s(2);
   const blk = ctx.doc.blocks.get(bn.toUpperCase());
@@ -794,7 +818,7 @@ function emitInsert(ctx, r, m, inh, attribs) {
       ctx.depth++;
       const acc = ctx.sink.beginInsert();
       walk(ctx, blk.ents, M, { layer: s.layer, color: s.color, ltype: s.ltype });
-      ctx.sink.endInsert(acc, blk.name, ctx.depth, s.layer);
+      ctx.sink.endInsert(acc, countName(ctx.doc, blk), ctx.depth, s.layer);
       ctx.depth--;
     }
     ctx.sink.cur = ctx.sink.lid(s.layer);
