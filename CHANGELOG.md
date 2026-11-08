@@ -12,6 +12,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 ### Fixed
 - Layout viewports now show the right part of model space. The view target, twist angle, non-rectangular clipping boundary and per-viewport frozen layers are applied. Before, viewports with a view target were blank.
 - The overall paper viewport of a layout is no longer drawn as a model viewport. Layouts that contain nothing else get no tab.
+- Damaged OLE data in a drawing can no longer stall or crash opening; the object is drawn as an outline instead.
 
 ## [0.1.1] – Preview – 2026-11-07
 

@@ -56,22 +56,26 @@ function extractOles(m, dwg) {
 function injectOles(doc, oles) {
   if (!oles || !oles.length) return;
   const byHandle = new Map(); for (const [h, nm] of doc.blockRecords) byHandle.set(h, nm);
-  // 有的版本 DXF 输出里已经带了 OLE2FRAME（含 310 数据），按角点去重
+  // 有的版本 DXF 输出里已经带了 OLE2FRAME：按角点去重；DXF 里那条没有数据时把数据补给它
   const key = (x, y) => Math.round(x * 1000) + ',' + Math.round(y * 1000);
-  const have = new Set();
-  const scan = ents => { for (const r of ents) if (r.type === 'OLE2FRAME' && r.has(310)) have.add(key(r.f(10), r.f(20))); };
+  const have = new Map();
+  const scan = ents => { for (const r of ents) if (r.type === 'OLE2FRAME') have.set(key(r.f(10), r.f(20)), r); };
   scan(doc.entities); for (const b of doc.blocks.values()) scan(b.ents);
+  // 哪些空间的图元写在 ENTITIES 段（当前布局和模型），其余布局的图元在 BLOCKS 段里
+  const inEntities = new Set(); for (const r of doc.entities) { const h = r.s(330).toUpperCase(); if (h) inEntities.add(h); }
   for (const o of oles) {
-    if (have.has(key(o.p1[0], o.p1[1]))) continue;
+    const old = have.get(key(o.p1[0], o.p1[1]));
+    if (old) { if (!old.has(310)) old._ole = o.data; continue; }
     const pairs = [[8, doc.layerHandles.get(o.layer) || '0'], [10, o.p1[0]], [20, o.p1[1]], [11, o.p2[0]], [21, o.p2[1]]];
+    const rec = makeRec('OLE2FRAME', pairs, { _ole: o.data });
     const bn = o.mode === 0 ? (byHandle.get(o.owner) || '') : '';
-    if (o.mode === 1) pairs.push([67, 1]);
-    if (bn && !/^\*(MODEL|PAPER)_SPACE/i.test(bn)) {
-      const b = doc.blocks.get(bn.toUpperCase()); if (b) b.ents.push(makeRec('OLE2FRAME', pairs, { _ole: o.data }));
-      continue;
-    }
-    if (bn) pairs.push([330, o.owner]);
-    doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data }));
+    if (o.mode === 1) { pairs.push([67, 1]); doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data })); continue; }
+    if (!bn || o.mode === 2) { doc.entities.push(rec); continue; }
+    const b = doc.blocks.get(bn.toUpperCase());
+    const isSpace = /^\*(MODEL|PAPER)_SPACE/i.test(bn);
+    if (isSpace && inEntities.has(o.owner)) { pairs.push([330, o.owner]); doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data })); continue; }
+    if (b) { b.ents.push(rec); continue; }
+    if (isSpace) { pairs.push([330, o.owner]); doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data })); }
   }
 }
 function errText(code) {

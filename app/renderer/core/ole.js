@@ -21,26 +21,31 @@ export function readCfb(all) {
   const u32 = o => dv.getUint32(o, true);
   const secShift = dv.getUint16(30, true), miniShift = dv.getUint16(32, true);
   const SS = 1 << secShift, MS = 1 << miniShift;
-  const nFat = u32(44), dirStart = u32(48), miniCut = u32(56), miniFatStart = u32(60), nMiniFat = u32(64), difStart = u32(68), nDif = u32(72);
+  if (SS < 128 || SS > 65536 || MS > SS) return null;
+  const maxSec = Math.ceil(b.length / SS);
+  // 所有数量都不能超过文件本身能容纳的扇区数，防止损坏的文件让程序卡死或耗尽内存
+  const nFat = Math.min(u32(44), maxSec), dirStart = u32(48), miniCut = u32(56), miniFatStart = u32(60), nMiniFat = Math.min(u32(64), maxSec), difStart = u32(68), nDif = Math.min(u32(72), maxSec);
   const sec = s => (s + 1) * SS;
+  const okSec = s => s < 0xfffffffa && sec(s) < b.length;
   const fatSecs = [];
   for (let i = 0; i < 109 && fatSecs.length < nFat; i++) fatSecs.push(u32(76 + i * 4));
   let d = difStart;
-  for (let k = 0; k < nDif && fatSecs.length < nFat && d < 0xfffffffa; k++) {
-    const o = sec(d); const per = SS / 4 - 1;
+  for (let k = 0; k < nDif && fatSecs.length < nFat && okSec(d); k++) {
+    const o = sec(d); const per = SS / 4 - 1; if (o + SS > b.length) break;
     for (let i = 0; i < per && fatSecs.length < nFat; i++) fatSecs.push(u32(o + i * 4));
     d = u32(o + per * 4);
   }
   const fat = [];
-  for (const s of fatSecs) { const o = sec(s); for (let i = 0; i < SS / 4; i++) fat.push(o + i * 4 + 4 <= b.length ? u32(o + i * 4) : 0xfffffffe); }
-  const chain = (start, table, limit) => { const r = []; let s = start; while (s < 0xfffffffa && r.length < limit) { r.push(s); s = table[s]; } return r; };
+  for (const s of fatSecs) { if (!okSec(s)) continue; const o = sec(s); for (let i = 0; i < SS / 4; i++) fat.push(o + i * 4 + 4 <= b.length ? u32(o + i * 4) : 0xfffffffe); }
+  const chain = (start, table, limit) => { const r = []; const seen = new Set(); let s = start; while (s !== undefined && s < 0xfffffffa && r.length < limit && !seen.has(s)) { seen.add(s); r.push(s); s = table[s]; } return r; };
   const readChain = (start, size) => {
+    size = Math.max(0, Math.min(size, b.length));
     const out = new Uint8Array(size); let p = 0;
-    for (const s of chain(start, fat, (size >> secShift) + 2)) { const o = sec(s); const n = Math.min(SS, size - p, b.length - o); if (n <= 0) break; out.set(b.subarray(o, o + n), p); p += n; }
+    for (const s of chain(start, fat, (size >> secShift) + 2)) { const o = sec(s); const n = Math.min(SS, size - p, b.length - o); if (n <= 0 || o < 0) break; out.set(b.subarray(o, o + n), p); p += n; }
     return out;
   };
   // 目录
-  const dirSecs = chain(dirStart, fat, 10000);
+  const dirSecs = chain(dirStart, fat, Math.min(10000, maxSec)).filter(okSec);
   const dirBytes = new Uint8Array(dirSecs.length * SS);
   dirSecs.forEach((s, i) => dirBytes.set(b.subarray(sec(s), sec(s) + SS), i * SS));
   const dd = new DataView(dirBytes.buffer);
@@ -53,13 +58,13 @@ export function readCfb(all) {
   const root = ents.find(e => e.type === 5);
   let mini = null, miniFat = null;
   if (root && root.size) mini = readChain(root.start, root.size);
-  if (nMiniFat) { const mf = readChain(miniFatStart, nMiniFat * SS); const v = new DataView(mf.buffer); miniFat = []; for (let i = 0; i < mf.length / 4; i++) miniFat.push(v.getUint32(i * 4, true)); }
+  if (nMiniFat) { const mf = readChain(miniFatStart, nMiniFat * SS); miniFat = new Uint32Array(mf.buffer, 0, mf.length >> 2); }
   const streams = new Map();
   for (const e of ents) {
     if (e.type !== 2) continue;
     if (e.size < miniCut && mini && miniFat) {
-      const out = new Uint8Array(e.size); let p = 0;
-      for (const s of chain(e.start, miniFat, (e.size >> miniShift) + 2)) { const n = Math.min(MS, e.size - p); out.set(mini.subarray(s * MS, s * MS + n), p); p += n; if (p >= e.size) break; }
+      const size = Math.min(e.size, mini.length); const out = new Uint8Array(size); let p = 0;
+      for (const s of chain(e.start, miniFat, (size >> miniShift) + 2)) { if (s * MS >= mini.length) break; const n = Math.min(MS, size - p, mini.length - s * MS); out.set(mini.subarray(s * MS, s * MS + n), p); p += n; if (p >= size) break; }
       streams.set(e.name, out);
     } else streams.set(e.name, readChain(e.start, e.size));
   }
@@ -111,10 +116,11 @@ function decodeDib(b) {
   else { w = dv.getInt32(4, true); h = dv.getInt32(8, true); bpp = dv.getUint16(14, true); comp = dv.getUint32(16, true); used = dv.getUint32(32, true); }
   if (comp !== 0 && comp !== 3) return null;
   const top = h < 0; h = Math.abs(h);
-  if (!w || !h || w * h > 16e6) return null;
-  const nPal = bpp <= 8 ? (used || (1 << bpp)) : 0;
+  if (!(w > 0) || !h || w * h > 16e6 || ![1, 4, 8, 16, 24, 32].includes(bpp)) return null;
+  const nPal = bpp <= 8 ? Math.min(used || (1 << bpp), 1 << bpp) : 0;
   const palOff = hs + (comp === 3 && hs === 40 ? 12 : 0); const pe = hs === 12 ? 3 : 4;
   const pal = []; for (let i = 0; i < nPal; i++) { const o = palOff + i * pe; pal.push([b[o + 2], b[o + 1], b[o]]); }
+  if (palOff + nPal * pe > b.length) return null;
   const px = palOff + nPal * pe; const stride = ((w * bpp + 31) >> 5) << 2;
   const out = new Uint8ClampedArray(w * h * 4);
   for (let y = 0; y < h; y++) {
@@ -130,6 +136,9 @@ function decodeDib(b) {
   }
   return { w, h, rgba: out };
 }
+
+// 交集为空时统一成 0 面积矩形（负宽度的矩形在 canvas 里仍会裁出一块区域）
+function emptyFix(c) { return c[2] <= c[0] || c[3] <= c[1] ? [c[0], c[1], c[0], c[1]] : c; }
 
 // WMF → { win:[x0,y0,w,h], ops:[...] }，坐标为 WMF 逻辑坐标（y 向下）
 // 指令：{ t:'L', p:[x,y,...], c, w }  折线；{ t:'F', p:[...], c } 填充多边形；
@@ -154,6 +163,7 @@ export function parseWmf(w, opts = {}) {
   let p = 0;
   const addObj = (obj) => { const i = objs.indexOf(null); if (i >= 0) objs[i] = obj; else objs.push(obj); };
   let guard = 0;
+  try {
   while (o + 6 <= w.length && guard++ < 2e6) {
     const size = dv.getUint32(o, true), fn = dv.getUint16(o + 4, true);
     if (size < 3) break;
@@ -167,7 +177,7 @@ export function parseWmf(w, opts = {}) {
       case 0x02FC: addObj({ k: 'brush', none: dv.getUint16(p, true) === 1, c: rgb(dv.getUint32(p + 2, true)) }); break;
       case 0x02FB: {
         let face = ''; for (let i = 18; i < 50 && p + i < end; i++) { const c = w[p + i]; if (!c) break; face += String.fromCharCode(c); }
-        const cs = w[p + 14];
+        const cs = w[p + 13];
         if (/[\x80-\xff]/.test(face)) face = decodeStr(Uint8Array.from(face, c => c.charCodeAt(0)), cs, opts.enc);
         addObj({ k: 'font', h: s16(0), esc: s16(2), bold: s16(4) >= 600, ital: !!w[p + 10], cs, face });
         break;
@@ -180,8 +190,8 @@ export function parseWmf(w, opts = {}) {
       case 0x0102: st.bkMode = s16(0); break;
       case 0x012E: st.align = dv.getUint16(p, true); break;
       case 0x001E: stack.push({ ...st }); break;
-      case 0x0127: { flush(); let k = s16(0); if (k >= 0) k = -1; let s = null; while (k++ < 0 && stack.length) s = stack.pop(); if (s) st = { ...s, cx: st.cx, cy: st.cy }; break; }
-      case 0x0416: { flush(); const r = [s16(3), s16(2), s16(1), s16(0)]; st.clip = st.clip ? [Math.max(st.clip[0], r[0]), Math.max(st.clip[1], r[1]), Math.min(st.clip[2], r[2]), Math.min(st.clip[3], r[3])] : r; break; }
+      case 0x0127: { flush(); let k = s16(0); if (k > 0) k = k - stack.length - 1; if (k >= 0) k = -1; let s = null; while (k++ < 0 && stack.length) s = stack.pop(); if (s) st = { ...s }; break; }
+      case 0x0416: { flush(); const r = [s16(3), s16(2), s16(1), s16(0)]; st.clip = emptyFix(st.clip ? [Math.max(st.clip[0], r[0]), Math.max(st.clip[1], r[1]), Math.min(st.clip[2], r[2]), Math.min(st.clip[3], r[3])] : r); break; }
       case 0x012C: flush(); st.clip = null; break;
       case 0x0214: flush(); st.cx = s16(1); st.cy = s16(0); break;
       case 0x0213: {
@@ -253,7 +263,7 @@ export function parseWmf(w, opts = {}) {
         // dx 是逐字节的步进；多字节字符的第二个字节步进为 0 或计入前一个
         let adv = 0; if (dx) for (const v of dx) adv += v;
         let clip = st.clip;
-        if (rect && (opt & 4)) clip = clip ? [Math.max(clip[0], rect[0]), Math.max(clip[1], rect[1]), Math.min(clip[2], rect[2]), Math.min(clip[3], rect[3])] : rect;
+        if (rect && (opt & 4)) clip = emptyFix(clip ? [Math.max(clip[0], rect[0]), Math.max(clip[1], rect[1]), Math.min(clip[2], rect[2]), Math.min(clip[3], rect[3])] : rect);
         ops.push({ t: 'T', x, y, s, h: st.font.h, c: st.tc, al: st.align, esc: st.font.esc / 10, bold: st.font.bold, ital: st.font.ital, face: st.font.face, adv, clip });
         if (st.align & 1) st.cx += adv;
         break;
@@ -262,8 +272,9 @@ export function parseWmf(w, opts = {}) {
     }
     o += size * 2;
   }
+  } catch (e) { /* 记录损坏：保留已经读到的内容 */ }
   flush();
-  let win = st.hasWin ? [st.win[0], st.win[1], st.win[2], st.win[3]] : null;
+  let win = st.hasWin && st.win[2] && st.win[3] ? [st.win[0], st.win[1], st.win[2], st.win[3]] : null;
   if (!win && bounds) win = [bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]];
   if (!win) { // 用内容范围
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -273,8 +284,20 @@ export function parseWmf(w, opts = {}) {
   return { win, ops };
 }
 
+// 嵌入的 Office 文档是 zip：按包内文件名判断是 Excel、Word 还是 PowerPoint
+function zipKind(z) {
+  const s = new TextDecoder('latin1').decode(z.subarray(0, Math.min(z.length, 1 << 20)));
+  if (s.includes('xl/workbook')) return 'xlsx';
+  if (s.includes('word/document')) return 'docx';
+  if (s.includes('ppt/presentation')) return 'pptx';
+  return 'zip';
+}
+
 // 解析一个 OLE2FRAME 的数据块
 export function parseOleFrame(data, opts = {}) {
+  try { return parseOleInner(data, opts); } catch (e) { return { error: String(e && e.message || e) }; }
+}
+function parseOleInner(data, opts) {
   const streams = readCfb(data);
   if (!streams) return { error: 'nocfb' };
   const pres = presentation(streams);
@@ -283,9 +306,9 @@ export function parseOleFrame(data, opts = {}) {
   if (co) { const s = new TextDecoder('latin1').decode(co); const m = s.match(/(Excel|Word|PowerPoint|Visio|Paint|Package|Acrobat|WPS|ET|Equation)[\w. ]*/i); progId = m ? m[0] : ''; }
   const key = [...streams.keys()].find(k => /^(package|contents)$/i.test(k));
   const pkg = key ? streams.get(key) : null;
-  const isXlsx = !!(pkg && pkg[0] === 0x50 && pkg[1] === 0x4b);
+  const pkgType = pkg && pkg[0] === 0x50 && pkg[1] === 0x4b ? zipKind(pkg) : '';
   let pic = null;
   if (pres && pres.kind === 'wmf') pic = parseWmf(pres.data, opts);
   else if (pres && pres.kind === 'dib') { const img = decodeDib(pres.data); if (img) pic = { win: [0, 0, img.w, img.h], ops: [{ t: 'I', x: 0, y: 0, w: img.w, h: img.h, img, clip: null }] }; }
-  return { pic, progId, pkg: isXlsx ? pkg : null, presKind: pres ? pres.kind : '' };
+  return { pic, progId, pkg: pkgType ? pkg : null, pkgType, presKind: pres ? pres.kind : '' };
 }

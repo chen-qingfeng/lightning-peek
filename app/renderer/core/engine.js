@@ -718,8 +718,8 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       let info = r._oleInfo;
       if (!info) {
         let data = r._ole;
-        if (!data) { const hex = r.all(310).join('').trim(); if (hex) { data = new Uint8Array(hex.length >> 1); for (let j = 0; j < data.length; j++) data[j] = parseInt(hex.substr(j * 2, 2), 16); } }
-        info = data ? parseOleFrame(data, { enc: ansiOf(ctx.doc) }) : { error: 'nodata' };
+        if (!data) { const hex = r.all(310).map(x => x.trim()).join(''); if (hex) { data = new Uint8Array(hex.length >> 1); for (let j = 0; j < data.length; j++) data[j] = parseInt(hex.substr(j * 2, 2), 16); } }
+        try { info = data ? parseOleFrame(data, { enc: ansiOf(ctx.doc) }) : { error: 'nodata' }; } catch (e) { info = { error: String(e && e.message || e) }; }
         r._oleInfo = info;
       }
       // pt1 = 左上角，pt2 = 右下角（WCS）
@@ -733,11 +733,12 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
         ctx.stats.skipped['OLE2FRAME?'] = (ctx.stats.skipped['OLE2FRAME?'] || 0) + 1;
         return 0;
       }
-      const [wx, wy, ww, wh] = pic.win;
+      let [wx, wy, ww, wh] = pic.win;
+      if (!ww || !wh) { ww = ww || 1; wh = wh || 1; }
       const ax = (TR[0] - TL[0]) / ww, ay = (TR[1] - TL[1]) / ww, bx = (BL[0] - TL[0]) / wh, by = (BL[1] - TL[1]) / wh;
       const L = [ax, ay, bx, by, TL[0] - ax * wx - bx * wy, TL[1] - ay * wx - by * wy];
       const bb = [Math.min(TL[0], TR[0], BR[0], BL[0]), Math.min(TL[1], TR[1], BR[1], BL[1]), Math.max(TL[0], TR[0], BR[0], BL[0]), Math.max(TL[1], TR[1], BR[1], BL[1])];
-      ctx.oles.push({ L, pic, layer: s.layer, bb, quad: [TL, TR, BR, BL], pkg: info.pkg, prog: info.progId, idx: ctx.oles.length });
+      ctx.oles.push({ L, pic, layer: s.layer, bb, quad: [TL, TR, BR, BL], pkg: info.pkg, pkgType: info.pkgType, prog: info.progId, idx: ctx.oles.length });
       return 0;
     }
     case 'SEQEND': case 'VERTEX': return 0;

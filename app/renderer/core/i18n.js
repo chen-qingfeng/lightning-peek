@@ -1,6 +1,9 @@
 // 闪电看图 · 界面语言
 // 中文原文即词条键；英文缺词时退回中文。语言按系统自动选择，可在「帮助」里切换。
 export const EN = {
+ "另存原文件": "Save original file",
+ "另存 Word": "Save Word",
+ "另存 PPT": "Save PowerPoint",
  "嵌入表格": "Embedded",
  "嵌入表格（OLE）": "Embedded tables (OLE)",
  "对比视图里不显示嵌入表格": "Embedded tables are not shown in compare view",

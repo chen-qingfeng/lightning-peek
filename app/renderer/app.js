@@ -286,7 +286,7 @@ function closeDoc(d) {
   if (state.cur === d) activate(state.docs[Math.min(i, state.docs.length - 1)] || null); else renderTabs();
   if (!state.docs.length) renderRecent();
 }
-function spaces(d) { return d.kind === 'drawing' ? d.scene.spaces.filter(s => s.batches.length || s.texts.length || s.fills.length || s.viewports.length || !s.paper) : [d.space]; }
+function spaces(d) { return d.kind === 'drawing' ? d.scene.spaces.filter(s => s.batches.length || s.texts.length || s.fills.length || s.viewports.length || (s.oles && s.oles.length) || !s.paper) : [d.space]; }
 function curSpace() { const d = state.cur; if (!d) return null; return d.kind === 'drawing' ? spaces(d)[d.spaceIdx] || spaces(d)[0] : d.space; }
 function modelSpace(d) { return d.scene.spaces.find(s => s.key === '*MODEL_SPACE'); }
 function renderSpaceTabs() {
@@ -368,7 +368,9 @@ function vpMatrix(vp, ms) {
 }
 function vpLayers(vp, base) {
   if (!vp.frozen || !vp.frozen.length) return base;
-  const m = new Map(base); for (const n of vp.frozen) m.set(n, false); return m;
+  // 只读视图：视口冻结的图层返回 false，其余沿用当前图层开关（不复制，开关变化立即生效）
+  const fz = vp._fz || (vp._fz = new Set(vp.frozen));
+  return { get: (n) => (fz.has(n) ? false : base.get(n)) };
 }
 function drawPaper(d, sp, M, rect, c2 = ctx, dpr = DPR) {
   const ms = modelSpace(d);
@@ -383,10 +385,10 @@ function drawPaper(d, sp, M, rect, c2 = ctx, dpr = DPR) {
     c2.closePath();
     if (x1 < rect[0] || x0 > rect[2] || y1 < rect[1] || y0 > rect[3]) { c2.restore(); continue; }
     c2.clip();
-    R.layerOn = vpLayers(vp, saved);
-    R.drawSpace(c2, ms, Mv, [Math.max(x0, rect[0]), Math.max(y0, rect[1]), Math.min(x1, rect[2]), Math.min(y1, rect[3])], { dpr });
-    R.layerOn = saved;
-    c2.restore();
+    try {
+      R.layerOn = vpLayers(vp, saved);
+      R.drawSpace(c2, ms, Mv, [Math.max(x0, rect[0]), Math.max(y0, rect[1]), Math.min(x1, rect[2]), Math.min(y1, rect[3])], { dpr });
+    } finally { R.layerOn = saved; c2.restore(); }
   }
   // 图纸空间自身的图元画在视口内容之上（图框、标注等）
   R.drawSpace(c2, sp, M, rect, { dpr });
@@ -1134,7 +1136,7 @@ function olePanel(body, d) {
     const row = h('div', { cls: 'mrow', style: 'display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #e6e9ee' },
       h('div', { style: 'flex:1;min-width:0' }, h('div', { style: 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis', text: title, title }), h('div', { style: 'color:#7a8594;font-size:11px', text: spName(it.sp) + (it.o.prog ? ' · ' + it.o.prog : '') })),
       h('button', { cls: 'btn', text: tr('定位'), onclick: () => locateOle(d, it) }),
-      it.o.pkg ? h('button', { cls: 'btn', text: tr('另存 Excel'), onclick: () => saveBytes(baseName(d) + '_' + safeName(title) + '.xlsx', it.o.pkg) }) : null);
+      it.o.pkg ? h('button', { cls: 'btn', text: OLE_SAVE[it.o.pkgType] || tr('另存原文件'), onclick: () => saveBytes(baseName(d) + '_' + safeName(title) + '.' + (it.o.pkgType || 'zip'), it.o.pkg) }) : null);
     body.append(row);
   }
 }
@@ -1146,7 +1148,8 @@ function oleTitle(o) {
   const line = o.pic.ops.filter(op => op.t === 'T' && Math.abs(op.y - best.y) < Math.abs(best.h) * 0.3 && Math.abs(op.h) === Math.abs(best.h)).sort((a, b) => a.x - b.x).map(op => op.s).join('');
   return line.trim().slice(0, 60);
 }
-function safeName(s) { return s.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40); }
+function safeName(s) { return s.replace(/[\\/:*?"<>|\s\x00-\x1f]+/g, '_').slice(0, 40).replace(/[._]+$/, '') || 'OLE'; }
+const OLE_SAVE = { xlsx: tr('另存 Excel'), docx: tr('另存 Word'), pptx: tr('另存 PPT') };
 function locateOle(d, it) {
   if (d.spaceIdx !== it.si) { d.spaceIdx = it.si; renderSpaceTabs(); }
   const b = it.o.bb; const w = Math.max(b[2] - b[0], b[3] - b[1]) * 0.05;
