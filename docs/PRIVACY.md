@@ -2,7 +2,7 @@
 
 [简体中文](#中文)
 
-This page describes what Lightning Peek 0.1.2 does with your data. It is based on the source code in this repository.
+This page describes what Lightning Peek 0.1.3 does with your data. It is based on the source code in this repository.
 
 ## Network
 
@@ -38,7 +38,7 @@ To remove everything: delete the program folder and any `.lpeek.json` files next
 
 ## 中文
 
-本页说明闪电看图 0.1.2 如何处理你的数据，依据是本仓库的源代码。
+本页说明闪电看图 0.1.3 如何处理你的数据，依据是本仓库的源代码。
 
 ### 网络
 

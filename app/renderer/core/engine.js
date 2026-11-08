@@ -173,7 +173,7 @@ export function parseDxf(text) {
           if (codes[p] !== 0) { p++; continue; }
           const r = readRec();
           if (r.type === 'BLOCK') {
-            cur = { name: r.s(2), bx: r.f(10), by: r.f(20), flags: r.i(70), ents: [] };
+            cur = { name: r.s(2), bx: r.f(10), by: r.f(20), flags: r.i(70), path: r.s(1), ents: [] };
             doc.blocks.set(cur.name.toUpperCase(), cur);
           } else if (r.type === 'ENDBLK') cur = null;
           else if (cur) cur.ents.push(r);
@@ -381,13 +381,13 @@ export function buildScene(doc, opts = {}) {
     const sink = opts.sinkFactory ? opts.sinkFactory(sp) : new SceneSink();
     const o = sp.paper ? [0, 0] : [ox, oy];
     const root = [1, 0, 0, 1, -o[0], -o[1]];
-    const ctx = { doc, sink, ltscale, stats, viewports: [], oles: [], depth: 0 };
+    const ctx = { doc, sink, ltscale, stats, viewports: [], oles: [], xrefs: [], depth: 0 };
     walk(ctx, sp.ents, root, { layer: '0', color: FG, ltype: 'CONTINUOUS' });
     const res = sink.finish();
     res.key = sp.key; res.name = sp.name; res.paper = sp.paper; res.origin = o;
     res.viewports = ctx.viewports;
     if (sp.paper) resolveClips(sp.ents, res.viewports);
-    res.oles = ctx.oles;
+    res.oles = ctx.oles; res.xrefs = ctx.xrefs;
     out.push(res);
   }
   const layers = [...doc.layers.values()].map(l => ({ name: l.name, color: l.color, on: !l.off && !l.frozen }));
@@ -481,11 +481,11 @@ function bulgeArc(x0, y0, x1, y1, b) {
 
 // 顶点列表（含凸度）→ 指令；同时返回折线化点用于捕捉/面积
 function polyOps(m, verts, closed) {
-  const ops = []; const flat = [];
-  const n = verts.length; if (n === 0) return { ops, flat };
+  const ops = []; const flat = []; const vi = [];
+  const n = verts.length; if (n === 0) return { ops, flat, vi };
   const segs = closed ? n : n - 1;
   let q = ap(m, verts[0][0], verts[0][1]);
-  ops.push(OP.M, q[0], q[1]); flat.push(q);
+  ops.push(OP.M, q[0], q[1]); flat.push(q); vi.push(0);
   for (let i = 0; i < segs; i++) {
     const a = verts[i], b = verts[(i + 1) % n];
     const bulge = a[2] || 0;
@@ -502,9 +502,10 @@ function polyOps(m, verts, closed) {
     } else {
       q = ap(m, b[0], b[1]); ops.push(OP.L, q[0], q[1]); flat.push(q);
     }
+    vi.push(flat.length - 1);
   }
   if (closed) ops.push(OP.Z);
-  return { ops, flat };
+  return { ops, flat, vi };
 }
 
 function emitEntity(ctx, r, ents, idx, m, inh) {
@@ -520,7 +521,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       S.path(s, [OP.M, a[0], a[1], OP.L, b[0], b[1]], dashFor(ctx, s, m), 0, t);
       S.snap(a[0], a[1], 1); S.snap(b[0], b[1], 1); S.snap((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 2);
       S.seg(a[0], a[1], b[0], b[1]);
-      S.curve(s.layer, Math.hypot(b[0] - a[0], b[1] - a[1]), [a, b]);
+      S.curve(s.layer, Math.hypot(b[0] - a[0], b[1] - a[1]), [a, b], null, 'line');
       return 0;
     }
     case 'XLINE': case 'RAY': {
@@ -537,7 +538,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       S.snap(c[0], c[1], 3);
       for (let k = 0; k < 4; k++) { const q = ap(M, r.f(10) + r.f(40) * Math.cos(k * Math.PI / 2), r.f(20) + r.f(40) * Math.sin(k * Math.PI / 2)); S.snap(q[0], q[1], 4); }
       S.circle(c[0], c[1], rr, 0, Math.PI * 2, true);
-      S.curve(s.layer, 2 * Math.PI * rr, [[c[0] - rr, c[1] - rr], [c[0] + rr, c[1] + rr]]);
+      S.curve(s.layer, 2 * Math.PI * rr, arcPoints(r.f(10), r.f(20), r.f(40), 0, Math.PI * 2, 64).map(q => ap(M, q[0], q[1])), null, 'circle');
       { const ring = []; for (let k = 0; k < 720; k++) ring.push(ap(M, r.f(10) + r.f(40) * Math.cos(k * Math.PI / 360), r.f(20) + r.f(40) * Math.sin(k * Math.PI / 360))); S.region(ring); }
       return 0;
     }
@@ -553,7 +554,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       let am = a1; while (am < a0) am += Math.PI * 2; am = (a0 + am) / 2;
       const pm = ap(M, r.f(10) + r.f(40) * Math.cos(am), r.f(20) + r.f(40) * Math.sin(am)); S.snap(pm[0], pm[1], 2);
       S.circle(c[0], c[1], r.f(40) * Math.sqrt(Math.abs(det(M))), 0, 0, false);
-      { let sw = a1 - a0; while (sw <= 0) sw += Math.PI * 2; const rr = r.f(40) * Math.sqrt(Math.abs(det(M))); const ps = arcPoints(r.f(10), r.f(20), r.f(40), a0, a1, 32).map(q => ap(M, q[0], q[1])); S.curve(s.layer, sw * rr, ps); }
+      { let sw = a1 - a0; while (sw <= 0) sw += Math.PI * 2; const rr = r.f(40) * Math.sqrt(Math.abs(det(M))); const ps = arcPoints(r.f(10), r.f(20), r.f(40), a0, a1, 64).map(q => ap(M, q[0], q[1])); S.curve(s.layer, sw * rr, ps, null, 'arc'); }
       return 0;
     }
     case 'ELLIPSE': {
@@ -588,12 +589,12 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
         else if (c === 42 && cur) cur[2] = parseFloat(r.v[j]);
       }
       const closed = (r.i(70) & 1) !== 0;
-      const { ops, flat } = polyOps(M, verts, closed);
+      const { ops, flat, vi } = polyOps(M, verts, closed);
       const w = r.f(43, 0) || (r.has(40) ? r.f(40) : 0);
       S.path(s, ops, dashFor(ctx, s, M), w * Math.sqrt(Math.abs(det(M))), t);
       polySnaps(S, M, verts, flat, closed);
       if (closed && flat.length > 2) S.region(flat);
-      S.curve(s.layer, polyLength(verts, closed) * Math.sqrt(Math.abs(det(M))), flat);
+      S.curve(s.layer, polyLength(verts, closed) * Math.sqrt(Math.abs(det(M))), flat, vi, 'pline');
       return 0;
     }
     case 'POLYLINE': {
@@ -613,11 +614,11 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       }
       const M = (flags & 8) ? m : om(); const s = st();
       const closed = (flags & 1) !== 0;
-      const { ops, flat } = polyOps(M, verts, closed);
+      const { ops, flat, vi } = polyOps(M, verts, closed);
       S.path(s, ops, dashFor(ctx, s, M), r.f(40, 0) * Math.sqrt(Math.abs(det(M))), t);
       polySnaps(S, M, verts, flat, closed);
       if (closed && flat.length > 2) S.region(flat);
-      S.curve(s.layer, (similarity(M) ? polyLength(verts, closed) * Math.sqrt(Math.abs(det(M))) : flatLen(closed ? [...flat, flat[0]] : flat)), flat);
+      S.curve(s.layer, (similarity(M) ? polyLength(verts, closed) * Math.sqrt(Math.abs(det(M))) : flatLen(closed ? [...flat, flat[0]] : flat)), flat, vi, 'pline');
       return consumed;
     }
     case 'SPLINE': {
@@ -788,6 +789,8 @@ function emitInsert(ctx, r, m, inh, attribs) {
       const T = [cos * sx, sin * sx, -sin * sy, cos * sy, ix, iy];
       const B = [1, 0, 0, 1, -blk.bx, -blk.by];
       const M = mul(base, mul(T, B));
+      // 外部参照：记下插入矩阵（外部图纸 WCS → 当前空间局部坐标），由界面加载外部图纸后叠加显示
+      if ((blk.flags & 4) && ctx.xrefs && ctx.xrefs.length < 2000) { ctx.xrefs.push({ name: blk.name, path: blk.path, M, layer: s.layer }); continue; }
       ctx.depth++;
       const acc = ctx.sink.beginInsert();
       walk(ctx, blk.ents, M, { layer: s.layer, color: s.color, ltype: s.ltype });
@@ -1107,13 +1110,23 @@ export class SceneSink {
     this.bb = [Infinity, Infinity, -Infinity, -Infinity];
     this.samplesX = []; this.samplesY = [];
     this.curves = []; this.layerIds = new Map(); this.inserts = []; this.acc = [];
+    // 曲线几何（点选曲线用）：点坐标、每点是否原始顶点、每条曲线的起点/点数/类型
+    this.cpts = []; this.cvf = []; this.cinfo = [];
   }
   lid(name) { let i = this.layerIds.get(name); if (i === undefined) { i = this.layerIds.size; this.layerIds.set(name, i); } return i; }
-  curve(layer, len, pts) {
+  curve(layer, len, pts, vi, kind) {
     if (!(len > 0) || this.curves.length > 6e6) return;
     let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity;
     for (const p of pts) { if (p[0] < a) a = p[0]; if (p[1] < b) b = p[1]; if (p[0] > c) c = p[0]; if (p[1] > d) d = p[1]; }
     this.curves.push(len, a, b, c, d, this.lid(layer));
+    const start = this.cpts.length / 2;
+    if (this.cpts.length < 8e6 && pts.length >= 2) {
+      for (const p of pts) this.cpts.push(p[0], p[1]);
+      const f = new Array(pts.length).fill(0);
+      if (vi) for (const i of vi) { if (i >= 0 && i < f.length) f[i] = 1; } else if (kind === 'line') f.fill(1); else { f[0] = 1; f[f.length - 1] = 1; }
+      for (const x of f) this.cvf.push(x);
+      this.cinfo.push(start, pts.length, CURVE_KIND[kind] || 0);
+    } else this.cinfo.push(start, 0, 0);
   }
   beginInsert() { const a = [Infinity, Infinity, -Infinity, -Infinity]; this.acc.push(a); return a; }
   endInsert(a, name, depth, layer) { this.acc.pop(); if (Number.isFinite(a[0]) && this.inserts.length < 600000) this.inserts.push({ n: name, d: depth, b: a, l: this.lid(layer || '0') }); }
@@ -1167,7 +1180,7 @@ export class SceneSink {
       batches, fills, texts: this.texts,
       snaps: Float64Array.from(this.snaps), circles: Float64Array.from(this.circles), segs: Float64Array.from(this.segs),
       regions: this.regions.map(g => ({ rings: g.rings.map(r => Float64Array.from(r)), l: g.l, hatch: g.hatch || 0 })),
-      curves: Float64Array.from(this.curves), curveLayers: [...this.layerIds.keys()], inserts: this.inserts,
+      curves: Float64Array.from(this.curves), cpts: Float64Array.from(this.cpts), cvf: Uint8Array.from(this.cvf), cinfo: Uint32Array.from(this.cinfo), curveLayers: [...this.layerIds.keys()], inserts: this.inserts,
       bbox: this.bb, view: smartExtents(this.bb, this.samplesX, this.samplesY),
     };
   }
@@ -1185,6 +1198,9 @@ function smartExtents(bb, xs, ys) {
   }
   return bb.slice();
 }
+
+// 曲线类型编号：0 其他（样条、椭圆等），1 直线，2 圆弧，3 圆，4 多段线
+export const CURVE_KIND = { line: 1, arc: 2, circle: 3, pline: 4 };
 
 // ---------- 对比：每个图元一个签名 ----------
 export class SigSink extends SceneSink {

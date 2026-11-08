@@ -30,9 +30,9 @@
 | REGION, 3DSOLID, BODY, MESH | No | |
 | MLEADER | No | |
 | Proxy / custom objects (e.g. TArch) | No | Export to plain entities ("T3") first |
-| External references | No | Planned |
+| External references | Yes | Loaded from the recorded path or the drawing's folder; view only, no snapping |
 
-## Tested drawings (0.1.2)
+## Tested drawings (0.1.3)
 
 | Drawing | Format | Result |
 | --- | --- | --- |
@@ -75,9 +75,9 @@ Opening the 380 KB DWG above took about 1 second in headless Chromium inside a L
 | 面域、三维实体 | 否 | |
 | 多重引线 | 否 | |
 | 代理/自定义对象（如天正） | 否 | 请先导出为普通图元（T3） |
-| 外部参照 | 否 | 计划中 |
+| 外部参照 | 是 | 按记录的路径或与图纸同目录查找；只显示，不能捕捉 |
 
-### 测试过的图纸（0.1.2）
+### 测试过的图纸（0.1.3）
 
 | 图纸 | 格式 | 结果 |
 | --- | --- | --- |

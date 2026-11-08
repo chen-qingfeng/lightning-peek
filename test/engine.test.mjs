@@ -72,3 +72,20 @@ test('version numbers agree across package files', () => {
   const pre = fs.readFileSync(new URL('../app/preload.js', import.meta.url), 'utf8').match(/version: '([^']+)'/)[1];
   assert.equal(app, root); assert.equal(pre, root);
 });
+
+test('外部参照：记录插入矩阵，不展开空块', () => {
+  const dxf = ['0', 'SECTION', '2', 'BLOCKS',
+    '0', 'BLOCK', '2', 'SITE', '70', '4', '10', '0', '20', '0', '1', 'D:\\proj\\site.dwg', '0', 'ENDBLK',
+    '0', 'ENDSEC', '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '11', '10', '21', '0',
+    '0', 'INSERT', '8', 'XR', '2', 'SITE', '10', '100', '20', '50', '41', '2', '42', '2', '50', '90',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const sc = buildScene(parseDxf(dxf));
+  const ms = sc.spaces[0];
+  assert.equal(ms.xrefs.length, 1);
+  const x = ms.xrefs[0];
+  assert.equal(x.name, 'SITE'); assert.equal(x.path, 'D:\\proj\\site.dwg'); assert.equal(x.layer, 'XR');
+  // 外部图纸 (1,0) → 旋转 90°、放大 2 倍后在 (100,52)，再换成局部坐标
+  const px = x.M[0] * 1 + x.M[4] + ms.origin[0], py = x.M[1] * 1 + x.M[5] + ms.origin[1];
+  assert.ok(Math.abs(px - 100) < 1e-9 && Math.abs(py - 52) < 1e-9, `${px},${py}`);
+});

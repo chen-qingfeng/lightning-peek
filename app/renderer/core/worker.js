@@ -92,6 +92,7 @@ function collect(scene, list = []) {
     for (const b of s.batches) list.push(b.ops.buffer);
     for (const f of s.fills) for (const r of f.rings) list.push(r.buffer);
     list.push(s.snaps.buffer, s.circles.buffer, s.segs.buffer);
+    if (s.cpts) list.push(s.cpts.buffer, s.cvf.buffer, s.cinfo.buffer);
     for (const g of s.regions) for (const r of g.rings) list.push(r.buffer);
   }
   return list;

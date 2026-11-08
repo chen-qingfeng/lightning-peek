@@ -2,7 +2,22 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
-## [0.1.2] – Preview – unreleased
+## [0.1.3] – Preview – unreleased
+
+### Added
+- Measurements are drawn like CAD dimensions: aligned and linear dimensions with extension lines and ticks (or arrows), and leaders for areas, radii, coordinates and counts. Labels can be dragged; dragging a dimension label moves the dimension line.
+- New measuring tools: linear (horizontal/vertical), point-to-line distance, arc/curve length, per-segment lengths of a polyline, batch lengths of picked lines, stationing at a fixed interval (K0+020 style), rectangle area, area with arc segments (press A), side area (length × height) and circle (radius, diameter, circumference, area).
+- Find Shapes: box-select a sample and count identical shapes even when they are not blocks (moved copies; rotated or mirrored copies are not counted).
+- Markup Style: text size, colour, dimension ends and decimals; Hide Markups; Redo (Ctrl+Y).
+- Rotate View in 90° steps and Mirror View.
+- External references: loaded automatically from the recorded path or the drawing's folder, listed under Tools → Xrefs, and a missing file can be chosen by hand.
+- Layout → Model: export the current layout, including clipped viewport contents, as a flat model-space DXF.
+
+### Changed
+- The drawing unit is detected automatically: from "L=" pipe length labels next to lines, then the file header, then survey coordinates. Drawings in metres are no longer measured as millimetres. The reason is shown in the status bar; click it to change.
+- Scale settings from older markup files are only reused when they were set by hand.
+
+## [0.1.2] – Preview – 2026-11-08
 
 ### Added
 - Embedded OLE objects (OLE2FRAME) are shown, for example Excel quantity tables pasted into the drawing. They are drawn from the preview Windows stored in the drawing (WMF), on a white background as in AutoCAD.
