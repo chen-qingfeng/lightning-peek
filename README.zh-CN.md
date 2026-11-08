@@ -64,11 +64,13 @@
 
 ## 安装与首次使用
 
-1. 从 [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) 下载 `LightningPeek-0.1.3-win-x64.zip`，解压到任意位置，例如 `D:\Tools\LightningPeek`。
-2. 双击 `LightningPeek.exe`。不需要安装，也不需要管理员权限。
+1. 从 [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) 下载其中一种：
+   - **安装版** `LightningPeek-0.1.3-setup-x64.exe`：按当前用户安装，不需要管理员权限；在桌面和开始菜单放图标，可选加入 DWG/DXF 的「打开方式」；可在「设置 → 应用」里卸载。设置和批注保存在 `%APPDATA%\闪电看图`，卸载时保留。
+   - **绿色版** `LightningPeek-0.1.3-win-x64.zip`：解压到任意位置，例如 `D:\Tools\LightningPeek`，设置保存在程序旁边的 `data` 文件夹。
+2. 双击桌面上的「闪电看图」图标，绿色版则双击 `LightningPeek.exe`。
    预览版没有代码签名，Windows SmartScreen 可能提示「未知发布者」。只有确认是从本仓库 Releases 下载的，才点「更多信息 → 仍要运行」。
 3. 点「打开」，或把 `.dwg` / `.dxf` 文件拖进窗口。
-4. 可选：运行 `add-context-menu.bat`，以后在图纸上点右键就有「用闪电看图打开」；`remove-context-menu.bat` 可移除。
+4. 绿色版可选：运行 `add-context-menu.bat`，以后在图纸上点右键就有「用闪电看图打开」；`remove-context-menu.bat` 可移除。
 
 界面语言跟随 Windows 显示语言（中文或英文），也可以在「帮助 → 界面语言」里切换。
 
@@ -130,6 +132,7 @@ npm install          # 安装开发用的 Electron
 npm start            # 从源码运行
 npm test             # 单元测试（无额外依赖）
 npm run pack:win     # 生成 dist/LightningPeek-<版本>-win-x64.zip
+npm run pack:setup   # 生成 dist/LightningPeek-<版本>-setup-x64.exe 安装程序（需要 NSIS 3）
 ```
 
 打包过程和目录结构见 [docs/BUILDING.md](docs/BUILDING.md)。

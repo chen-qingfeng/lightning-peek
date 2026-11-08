@@ -11,6 +11,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 - Markup Style: text size, colour, dimension ends and decimals; Hide Markups; Redo (Ctrl+Y).
 - Rotate View in 90° steps and Mirror View. Export and print always use the drawing's own orientation.
 - External references: loaded automatically from the recorded path or the drawing's folder, listed under Tools → Xrefs, and a missing file can be chosen by hand.
+- Windows installer (`LightningPeek-<version>-setup-x64.exe`): per-user install without administrator rights, desktop and Start menu shortcuts, optional Open with entry for DWG/DXF, uninstaller. Installed copies keep their data in `%APPDATA%\闪电看图`.
 - Layout → Model: export the current layout, including clipped viewport contents, as a flat model-space DXF.
 
 ### Changed

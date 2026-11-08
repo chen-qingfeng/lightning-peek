@@ -58,6 +58,14 @@ The script:
 2. Renames `electron.exe` to `LightningPeek.exe`, removes the default Electron app and keeps only the `en-US`, `zh-CN` and `zh-TW` locale files.
 3. Replaces the exe icon and version information with `build/pe_patch.py`. This edits resources in place; the result is not code-signed.
 4. Copies `app/` to `resources/app/`, adds licenses, notices, `README.txt` and the right-click menu scripts.
+
+## Windows installer
+
+```sh
+npm run pack:setup
+```
+
+Builds `dist/LightningPeek-<version>-setup-x64.exe` from the portable folder with NSIS 3 (`build/installer.nsi`). On Windows install NSIS; on Linux or macOS you can use the NSIS bundle from `electron-builder-binaries` and set `MAKENSIS` and `NSISDIR`. The installer installs per user into `%LOCALAPPDATA%\Programs\LightningPeek` without administrator rights, creates desktop and Start menu shortcuts, optionally adds an **Open with** entry for `.dwg`/`.dxf`, and registers an uninstaller. It writes `installed.flag` next to the exe, which makes the app keep its data in `%APPDATA%\闪电看图` instead of a `data` folder.
 5. Writes `dist/LightningPeek-<version>-win-x64.zip` and its `.sha256` file.
 
 ## Regenerate sample drawings
@@ -92,6 +100,10 @@ npm start
 ```sh
 npm test
 ```
+
+### 打安装程序
+
+`npm run pack:setup` 用 NSIS 3（`build/installer.nsi`）把绿色版目录打成 `dist/LightningPeek-<版本>-setup-x64.exe`。按当前用户安装到 `%LOCALAPPDATA%\Programs\LightningPeek`，不需要管理员权限；创建桌面和开始菜单图标，可选加入「打开方式」，注册卸载程序。安装后会在 exe 旁边放 `installed.flag`，程序据此把数据存到 `%APPDATA%\闪电看图`。
 
 ### 打 Windows 包
 

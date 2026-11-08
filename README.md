@@ -61,11 +61,13 @@ The full plan — layer classification, drawing checks, natural-language queries
 
 ## Install and first use
 
-1. Download `LightningPeek-0.1.3-win-x64.zip` from [Releases](https://github.com/chen-qingfeng/lightning-peek/releases) and unzip it anywhere, for example `D:\Tools\LightningPeek`.
-2. Double-click `LightningPeek.exe`. Nothing is installed and no administrator rights are needed.
+1. From [Releases](https://github.com/chen-qingfeng/lightning-peek/releases), download either:
+   - **Installer** `LightningPeek-0.1.3-setup-x64.exe`: installs for the current user (no administrator rights), adds a desktop icon and a Start menu entry, can add Lightning Peek to **Open with** for DWG/DXF, and can be removed from **Settings → Apps**. Your settings and markups are kept in `%APPDATA%\闪电看图`.
+   - **Portable** `LightningPeek-0.1.3-win-x64.zip`: unzip anywhere, for example `D:\Tools\LightningPeek`. Settings are stored in the `data` folder next to the program.
+2. Start Lightning Peek from the desktop icon, or double-click `LightningPeek.exe` in the portable folder.
    Windows SmartScreen may warn that the app is from an unknown publisher, because the preview is not code-signed. Choose **More info → Run anyway** only if you downloaded it from this repository's Releases page.
 3. Click **Open** or drag a `.dwg` / `.dxf` file into the window.
-4. Optional: run `add-context-menu.bat` to get **Open with Lightning Peek** when you right-click a drawing. `remove-context-menu.bat` removes it.
+4. Portable build, optional: run `add-context-menu.bat` to get **Open with Lightning Peek** when you right-click a drawing. `remove-context-menu.bat` removes it.
 
 The interface follows the Windows display language (Chinese or English). You can switch it under **Help → Interface language**.
 
@@ -127,6 +129,7 @@ npm install          # installs Electron for local development
 npm start            # runs the app from source
 npm test             # unit tests (no extra dependencies)
 npm run pack:win     # builds dist/LightningPeek-<version>-win-x64.zip
+npm run pack:setup   # builds dist/LightningPeek-<version>-setup-x64.exe (needs NSIS 3)
 ```
 
 See [docs/BUILDING.md](docs/BUILDING.md) for how the package is assembled and how the project is laid out.

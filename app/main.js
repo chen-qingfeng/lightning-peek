@@ -13,6 +13,8 @@ const ROOT = path.join(__dirname, 'renderer');
 // ---- 便携数据目录：程序目录下的 data\，写不进去才退回系统用户目录 ----
 function pickDataDir() {
   const exeDir = path.dirname(process.execPath);
+  // 安装版（安装程序会放一个 installed.flag）：数据放在用户的 AppData，卸载、升级都不丢
+  if (app.isPackaged && fs.existsSync(path.join(exeDir, 'installed.flag'))) return path.join(app.getPath('appData'), APP_NAME);
   const portable = app.isPackaged ? path.join(exeDir, 'data') : path.join(__dirname, '..', 'data-dev');
   try { fs.mkdirSync(portable, { recursive: true }); fs.accessSync(portable, fs.constants.W_OK); return portable; }
   catch (e) { return path.join(app.getPath('appData'), APP_NAME); }

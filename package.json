@@ -8,7 +8,8 @@
   "scripts": {
     "start": "electron app",
     "test": "node --test test/*.test.mjs",
-    "pack:win": "bash build/pack-win.sh"
+    "pack:win": "bash build/pack-win.sh",
+    "pack:setup": "bash build/pack-installer.sh"
   },
   "devDependencies": {
     "electron": "33.2.1"
