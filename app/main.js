@@ -7,7 +7,7 @@ const { execFile } = require('child_process');
 
 const APP_NAME = '闪电看图';
 let LANG = 'zh';
-const EN = { '选择 ODAFileConverter.exe': 'Choose ODAFileConverter.exe', '另存为 DWG': 'Save as DWG', '转换器没有生成 DWG 文件': 'The converter did not produce a DWG file', '打开图纸': 'Open drawing', '选择要对比的新图纸': 'Choose the new drawing to compare', 'CAD 图纸': 'CAD drawings', '所有文件': 'All files', '保存': 'Save', 'Excel 工作簿': 'Excel workbook', 'PNG 图片': 'PNG image', 'PDF 文档': 'PDF document', '导出 PDF': 'Export PDF', '选择文件': 'Choose a file', '文件': 'Files', '只能打开 DWG / DXF 文件': 'Only DWG and DXF files can be opened', '文件超过 400MB': 'The file is larger than 400 MB', '不允许写入该位置': 'Writing to this location is not allowed', '闪电看图': 'Lightning Peek' };
+const EN = { '选择 ODAFileConverter.exe': 'Choose ODAFileConverter.exe', '另存为 DWG': 'Save as DWG', '转换器没有生成 DWG 文件': 'The converter did not produce a DWG file', '打开图纸': 'Open drawing', '选择要对比的新图纸': 'Choose the new drawing to compare', 'CAD 图纸': 'CAD drawings', '所有文件': 'All files', '保存': 'Save', 'Excel 工作簿': 'Excel workbook', 'PNG 图片': 'PNG image', 'PDF 文档': 'PDF document', '导出 PDF': 'Export PDF', '选择文件': 'Choose a file', '文件': 'Files', '只能打开 DWG / DXF 文件': 'Only DWG and DXF files can be opened', '文件超过 400MB': 'The file is larger than 400 MB', '不允许写入该位置': 'Writing to this location is not allowed', '闪电看图': 'Lightning Peek', '选择 CAD 字体文件夹': 'Choose the CAD font folder' };
 const tm = (s) => (LANG === 'en' ? EN[s] || s : s);
 const ROOT = path.join(__dirname, 'renderer');
 
@@ -29,7 +29,7 @@ const SETTINGS = path.join(DATA, 'settings.json');
 
 protocol.registerSchemesAsPrivileged([{ scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }]);
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8' };
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.txt': 'text/plain; charset=utf-8', '.woff2': 'font/woff2', '.woff': 'font/woff', '.webmanifest': 'application/manifest+json' };
 
 let win = null;
 const pendingFiles = [];
@@ -130,6 +130,116 @@ ipcMain.handle('open-any', async (e, opt = {}) => {
   return r.canceled ? [] : r.filePaths;
 });
 ipcMain.handle('get-settings', () => { const s = loadSettings(); delete s.window; return s; });
+
+// ---- 本机 SHX / TTF 字体。不把字体文件打进安装包，按文件名到用户指定的文件夹里取。----
+const FONT_EXT = /\.(shx|ttf|otf|ttc)$/i;
+let fontCache = null;
+function autoFontDirs() {
+  const out = [];
+  const seen = new Set();
+  const add = (p) => {
+    if (!p || seen.has(p)) return;
+    seen.add(p);
+    try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) out.push(p); } catch (e) { /* 盘符不存在 */ }
+  };
+  if (process.platform === 'win32') {
+    for (const L of 'CDEFGHIJKLMNOPQRSTUVWXYZ') {
+      add(L + ':\\CAD软件大全\\CAD万能字体');
+      add(L + ':\\CAD万能字体');
+    }
+    for (const r of [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean)) {
+      let subs = [];
+      try { subs = fs.readdirSync(path.join(r, 'Autodesk')); } catch (e) { continue; }
+      for (const d of subs) if (/autocad/i.test(d)) add(path.join(r, 'Autodesk', d, 'Fonts'));
+    }
+  }
+  return out;
+}
+function fontDirs() {
+  const s = loadSettings();
+  const local = path.join(DATA, 'fonts');
+  const dirs = [];
+  if (fs.existsSync(local)) dirs.push(local);
+  const chosen = Array.isArray(s.fontDirs) ? s.fontDirs.filter(d => typeof d === 'string' && fs.existsSync(d)) : [];
+  if (!s.fontDirs) {
+    const found = autoFontDirs();
+    if (found.length) { s.fontDirs = found; saveSettings(s); }
+    dirs.push(...found);
+  } else dirs.push(...chosen);
+  return dirs;
+}
+function walkFonts(dir, map, depth, overwrite) {
+  if (depth > 5) return;
+  let ents = [];
+  try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { return; }
+  for (const ent of ents) {
+    if (!ent.name || ent.name.startsWith('.')) continue;
+    const p = path.join(dir, ent.name);
+    if (ent.isDirectory()) walkFonts(p, map, depth + 1, overwrite);
+    else if (FONT_EXT.test(ent.name)) {
+      const key = ent.name.toLowerCase();
+      if (overwrite || !map.has(key)) map.set(key, p);
+    }
+  }
+}
+function fontMap() {
+  if (fontCache) return fontCache;
+  const map = new Map();
+  const dirs = fontDirs();
+  dirs.forEach((d, i) => walkFonts(d, map, 0, i > 0));
+  fontCache = map;
+  return map;
+}
+function forgetFonts() { fontCache = null; }
+ipcMain.handle('font-info', (e, names) => {
+  const map = fontMap();
+  const have = {};
+  for (const n of names || []) have[n] = map.has(String(n).toLowerCase());
+  const s = loadSettings();
+  return { dirs: s.fontDirs || [], count: map.size, have };
+});
+ipcMain.handle('font-read', (e, names) => {
+  const map = fontMap();
+  const out = [];
+  for (const n of (names || []).slice(0, 80)) {
+    const p = map.get(String(n).toLowerCase());
+    if (!p) { out.push([n, null]); continue; }
+    try {
+      const st = fs.statSync(p);
+      if (st.size > 32 * 1024 * 1024) { out.push([n, null]); continue; }
+      out.push([n, new Uint8Array(fs.readFileSync(p))]);
+    } catch (err) { out.push([n, null]); }
+  }
+  return out;
+});
+ipcMain.handle('font-pick-dir', async () => {
+  const r = await dialog.showOpenDialog(win, { title: tm('选择 CAD 字体文件夹'), properties: ['openDirectory'] });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const s = loadSettings();
+  const dirs = (Array.isArray(s.fontDirs) ? s.fontDirs : []).filter(d => d !== r.filePaths[0]);
+  dirs.push(r.filePaths[0]);
+  s.fontDirs = dirs;
+  saveSettings(s);
+  forgetFonts();
+  return { dir: r.filePaths[0], dirs, count: fontMap().size };
+});
+ipcMain.handle('font-copy', () => {
+  const dest = path.join(DATA, 'fonts');
+  fs.mkdirSync(dest, { recursive: true });
+  let n = 0;
+  for (const [name, src] of fontMap()) {
+    const to = path.join(dest, name);
+    if (path.resolve(src) === path.resolve(to)) continue;
+    try {
+      const a = fs.statSync(src);
+      if (fs.existsSync(to) && fs.statSync(to).size === a.size) { n++; continue; }
+      fs.copyFileSync(src, to);
+      n++;
+    } catch (e) { /* 跳过打不开的文件 */ }
+  }
+  forgetFonts();
+  return { copied: n, dest };
+});
 ipcMain.handle('set-settings', (e, obj) => { const s = loadSettings(); saveSettings({ ...s, ...obj, window: s.window, lastDir: s.lastDir, lastSaveDir: s.lastSaveDir }); return true; });
 ipcMain.handle('save-bytes', async (e, name, bytes) => {
   const s = loadSettings();

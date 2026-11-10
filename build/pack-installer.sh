@@ -4,7 +4,7 @@
 # 设置 MAKENSIS=<makensis 路径>、NSISDIR=<nsis 解压目录>。
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-VER="$(python3 -c "import json;print(json.load(open('$HERE/app/package.json'))['version'])")"
+VER="$(node -p "require('$HERE/app/package.json').version")"
 SRC="$HERE/dist/LightningPeek-$VER-win-x64"
 OUT="$HERE/dist/LightningPeek-$VER-setup-x64.exe"
 MAKENSIS="${MAKENSIS:-makensis}"

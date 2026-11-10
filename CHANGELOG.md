@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.1.7] – Preview – 2026-11-10
+
+### Added
+- A Chinese font is bundled (Noto Sans SC), so drawings stay readable on computers that do not have `hztxt.shx`, `gbcbig.shx` or a system CJK font.
+- Help can point at a local SHX / TrueType folder. Those fonts are used when present, and can be copied into the app's own font folder. They are not included in the installer.
+
 ## [0.1.6] – Preview – 2026-11-10
 
 ### Added

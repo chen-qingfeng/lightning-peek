@@ -276,16 +276,37 @@ function fontFor(doc, styleName) {
   if (/msyh|yahei|雅黑/.test(f + n)) return 4;
   if (/arial|tahoma|verdana|calibri/.test(f)) return 5;
   if (/times/.test(f)) return 6;
-  return 0; // SHX 等单线字体：用仿宋代替
+  return 0; // 没有对应的 SHX 文件时，用仿宋代替
 }
+function shxName(s) {
+  if (!s) return '';
+  const base = String(s).split(/[\\/]/).pop().trim();
+  if (!base || /^ltypeshp(\.shx)?$/i.test(base)) return '';
+  if (/\.(ttf|otf|ttc)$/i.test(base)) return '';
+  if (/\.shx$/i.test(base)) return base.toLowerCase();
+  if (/^[A-Za-z0-9_@$#+-]+$/.test(base)) return base.toLowerCase() + '.shx';
+  return '';
+}
+function ttfName(s) {
+  if (!s) return '';
+  const base = String(s).split(/[\\/]/).pop().trim();
+  return /\.(ttf|otf|ttc)$/i.test(base) ? base.toLowerCase() : '';
+}
+// 样式里写的字体文件名。sf/bf 是 SHX，ff 是 TrueType。真正的字形在用户的字体文件夹里。
+export function styleFace(style) {
+  if (!style) return { sf: '', bf: '', ff: '' };
+  return { sf: shxName(style.font), bf: shxName(style.big), ff: ttfName(style.font) || ttfName(style.big) };
+}
+// 第一项是随软件附带的 Noto Sans SC。别人的电脑没有 hztxt.shx / 宋体时，汉字仍然能画出来。
+const BUNDLED_CJK = '"Noto Sans SC",';
 export const FONT_FAMILIES = [
-  '"FangSong","仿宋","STFangsong","SimSun","Noto Serif CJK SC",serif',
-  '"SimHei","黑体","Microsoft YaHei","Noto Sans CJK SC",sans-serif',
-  '"KaiTi","楷体","STKaiti","Noto Serif CJK SC",serif',
-  '"SimSun","宋体","NSimSun","Noto Serif CJK SC",serif',
-  '"Microsoft YaHei","微软雅黑","Noto Sans CJK SC",sans-serif',
-  'Arial,"Microsoft YaHei","Noto Sans CJK SC",sans-serif',
-  '"Times New Roman","SimSun","Noto Serif CJK SC",serif',
+  BUNDLED_CJK + '"FangSong","仿宋","STFangsong","SimSun","Noto Serif CJK SC",serif',
+  BUNDLED_CJK + '"SimHei","黑体","Microsoft YaHei","Noto Sans CJK SC",sans-serif',
+  BUNDLED_CJK + '"KaiTi","楷体","STKaiti","Noto Serif CJK SC",serif',
+  BUNDLED_CJK + '"SimSun","宋体","NSimSun","Noto Serif CJK SC",serif',
+  BUNDLED_CJK + '"Microsoft YaHei","微软雅黑","Noto Sans CJK SC",sans-serif',
+  BUNDLED_CJK + 'Arial,"Microsoft YaHei","Noto Sans CJK SC",sans-serif',
+  BUNDLED_CJK + '"Times New Roman","SimSun","Noto Serif CJK SC",serif',
 ];
 
 // ---------- 绘图指令编码 ----------
@@ -851,6 +872,7 @@ function emitText(ctx, r, m, s) {
     anchor = p1; ha = 0; va = 0;
   } else if (ha === 4) { ha = 1; va = 2; }
   const item = textItem(m, anchor[0], anchor[1], rot, h, wf, obl, ha, va, str, fontFor(doc, r.s(7)), s, gen);
+  Object.assign(item, styleFace(style));
   item.hd = r.s(5); if (ctx.depth) item.blk = 1;
   if (fitW > 0) item.fit = fitW * Math.sqrt(Math.abs(det(m)));
   ctx.sink.text(s, item);
@@ -908,7 +930,7 @@ function emitMText(ctx, r, m, s) {
     if (!str && i !== 0) return;
     if (!str) return;
     const dy = top - h - i * lh;
-    const it = textItem(M, x, y, rot, h, wfe, 0, col, 0, str, font, s, 0, dy); it.hd = r.s(5); it.mt = 1; it.li = i; it.ln = n; if (ctx.depth) it.blk = 1; if (!ctx.sink._paraDone || ctx.sink._paraDone !== r) { it.para = lines.join('\n'); ctx.sink._paraDone = r; }
+    const it = textItem(M, x, y, rot, h, wfe, 0, col, 0, str, font, s, 0, dy); Object.assign(it, styleFace(style)); it.hd = r.s(5); it.mt = 1; it.li = i; it.ln = n; if (ctx.depth) it.blk = 1; if (!ctx.sink._paraDone || ctx.sink._paraDone !== r) { it.para = lines.join('\n'); ctx.sink._paraDone = r; }
     ctx.sink.text(s, it);
   });
 }

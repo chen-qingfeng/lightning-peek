@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.1.6 preview</b> (the Windows installer on Releases is still v0.1.5; the phone build opens in a browser)</p>
+<p align="center"><b>Current version: v0.1.7 preview</b></p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 
@@ -104,7 +104,7 @@ Tool shortcuts (default): `1` Length · `2` Polyline · `3` Area · `4` Pick are
 
 Known limitations in v0.1.4:
 
-- SHX fonts are drawn with system fonts (FangSong, SimSun and similar), so text width can differ slightly from AutoCAD.
+- A Chinese font is bundled (Noto Sans SC, SIL Open Font License). Drawings stay readable on computers that do not have `hztxt.shx`, `gbcbig.shx` or SimSun. If this computer has an SHX font folder selected under Help, those single-line fonts are used instead and the lettering is closer to CAD.
 - Custom objects from vertical software (for example TArch walls and doors) are not shown unless the drawing was exported to plain entities (“T3” format).
 - Wipeouts, 3D solids, regions and multileaders are not shown. External references are shown when the referenced DWG/DXF is found, but you cannot snap to them. Raster images are shown as an outline only.
 - OLE objects are shown from the preview stored in the drawing. If the drawing has no preview for an object, only its frame is drawn.

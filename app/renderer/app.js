@@ -2,6 +2,7 @@
 import { Renderer, mapply, mmul, minv, css } from './core/render.js';
 import { makeXlsx } from './core/xlsx.js';
 import { encodeLegacy } from './core/engine.js';
+import { installFont } from './core/shx.js';
 import { t as tr, LANG, setLang } from './core/i18n.js';
 
 // ---------------- 桥接（Electron / 浏览器兜底） ----------------
@@ -30,6 +31,7 @@ let ctx = sctx;
 let painted = null;
 let chromeTimer = 0;
 const R = new Renderer();
+R.ttf = new Map();
 const state = { docs: [], cur: null, tool: null, snap: true, ortho: false, settings: { recent: [] }, side: null, mouse: null, hover: null, tmp: [], tmpArc: new Set(), batchSel: [], dirty: false, flash: null, hideMarks: false };
 let worker = null, rpcId = 1; const pending = new Map();
 let DPR = window.devicePixelRatio || 1;
@@ -251,11 +253,12 @@ async function openBytes(name, bytes, path, opt = {}) {
     };
     for (const sp of sc.spaces) { sp.items = { m: doc.measures }; }
     await loadSidecar(doc);
+    const fontNote = await loadSceneFonts(sc);
     if (!opt.hidden) { state.docs.push(doc); activate(doc); addRecent(path, name); if (xrefList(doc).length) setTimeout(() => loadXrefs(doc), 0); }
     busy();
     const sk = Object.entries(sc.stats.skipped).filter(([k]) => !/^(ATTDEF|SEQEND)$/.test(k));
     if (!opt.hidden && sc.stats.entities === 0) { toast(tr('这张图纸里没有可显示的图元'), 5000); return doc; }
-    if (!opt.hidden) toast(tr('已打开 {0}　{1}　{2} 个图元　用时 {3} 秒', name, sc.info.version, sc.stats.entities.toLocaleString(), (doc.openMs / 1000).toFixed(2)) + (sk.length ? tr('　（{0} 暂不显示）', sk.map(([k, v]) => k + '×' + v).join('，')) : '') + (doc.unit.uf !== 1 ? tr('　测量单位：1 图纸单位 = {0} mm（{1}，可点状态栏的比例修改）', +doc.unit.uf.toFixed(4), tr(UNIT_WHY[doc.unit.why] || '')) : ''), 7000);
+    if (!opt.hidden) toast(tr('已打开 {0}　{1}　{2} 个图元　用时 {3} 秒', name, sc.info.version, sc.stats.entities.toLocaleString(), (doc.openMs / 1000).toFixed(2)) + (sk.length ? tr('　（{0} 暂不显示）', sk.map(([k, v]) => k + '×' + v).join('，')) : '') + (doc.unit.uf !== 1 ? tr('　测量单位：1 图纸单位 = {0} mm（{1}，可点状态栏的比例修改）', +doc.unit.uf.toFixed(4), tr(UNIT_WHY[doc.unit.why] || '')) : '') + fontNote, 7000);
     return doc;
   } catch (err) { busy(); toast(tr('打开失败：') + err.message, 6000); console.error(err); }
 }
@@ -619,7 +622,7 @@ function drawCompare(d, M, rect) {
       ctx.save(); ctx.beginPath(); ctx.rect(side * half, 0, half, H0); ctx.clip();
       cmpLayers(d, Ms, [side * half, 0, side * half + half, H0], set);
       ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = 'rgba(29,42,58,.85)'; ctx.fillRect(side * half + 8 * DPR, 8 * DPR, Math.min(half - 16 * DPR, 360 * DPR), 24 * DPR);
-      ctx.fillStyle = '#fff'; ctx.font = `${12.5 * DPR}px "Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.fillText(title, side * half + 16 * DPR, 25 * DPR);
+      ctx.fillStyle = '#fff'; ctx.font = `${12.5 * DPR}px "Noto Sans SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.fillText(title, side * half + 16 * DPR, 25 * DPR);
       ctx.restore();
     }
     ctx.fillStyle = '#ffb400'; ctx.fillRect(half - DPR, 0, 2 * DPR, H0);
@@ -631,7 +634,7 @@ function drawCompare(d, M, rect) {
     ctx.beginPath(); ctx.arc(x, H0 / 2, 14 * DPR, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#1d2a3a'; ctx.font = `600 ${12 * DPR}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('⇆', x, H0 / 2); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     ctx.fillStyle = 'rgba(29,42,58,.85)'; ctx.fillRect(8 * DPR, 8 * DPR, 120 * DPR, 22 * DPR); ctx.fillRect(W0 - 128 * DPR, 8 * DPR, 120 * DPR, 22 * DPR);
-    ctx.fillStyle = '#fff'; ctx.font = `${12 * DPR}px "Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.fillText(tr('◀ 旧图'), 16 * DPR, 23 * DPR); ctx.fillText(tr('新图 ▶'), W0 - 118 * DPR, 23 * DPR);
+    ctx.fillStyle = '#fff'; ctx.font = `${12 * DPR}px "Noto Sans SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.fillText(tr('◀ 旧图'), 16 * DPR, 23 * DPR); ctx.fillText(tr('新图 ▶'), W0 - 118 * DPR, 23 * DPR);
   } else cmpLayers(d, M, rect, ALL);
 }
 function drawCompareChrome(d, M, live = true) {
@@ -802,7 +805,7 @@ function drawOverlays(d, M) {
 }
 function label(text, x, y, opt = {}) {
   const fs = 12.5 * DPR;
-  ctx.font = `600 ${fs}px "Microsoft YaHei","Noto Sans CJK SC",sans-serif`;
+  ctx.font = `600 ${fs}px "Noto Sans SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif`;
   const lines = String(text).split('\n');
   const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 10 * DPR, h = lines.length * fs * 1.3 + 6 * DPR;
   const bx = x - w / 2, by = y - h - 6 * DPR;
@@ -816,7 +819,7 @@ function label(text, x, y, opt = {}) {
 }
 function dot(p, c) { ctx.fillStyle = c; ctx.fillRect(p[0] - 3 * DPR, p[1] - 3 * DPR, 6 * DPR, 6 * DPR); }
 // ---- CAD 样式的尺寸线与引线 ----
-const MFONT = '"Microsoft YaHei","Noto Sans CJK SC",sans-serif';
+const MFONT = '"Noto Sans SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif';
 function mColor(hi, d = state.cur) { return hi ? '#ff3b8d' : (d && d.unit && d.unit.color) || (R.bg === 'white' ? '#d9480f' : '#ff8a3d'); }
 function tsNow() { const d = state.cur; return ((d && d.unit && d.unit.ts) || 13) * DPR / view().s; } // 文字高度（图纸单位），随图缩放
 function loNow() { const s = view().s; return [30 * DPR / s, 24 * DPR / s]; }
@@ -991,14 +994,14 @@ function drawAnnot(a, hi) {
   if (a.type === 'num') {
     const r = Math.max(9 * DPR, Math.min((a.size || 0) * s * 0.75, 300 * DPR));
     ctx.beginPath(); ctx.arc(P[0][0], P[0][1], r, 0, Math.PI * 2); ctx.fillStyle = R.bg === 'white' ? '#fff' : '#000'; ctx.fill(); ctx.stroke();
-    ctx.fillStyle = c; ctx.font = `600 ${r * 1.1}px "Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = c; ctx.font = `600 ${r * 1.1}px "Noto Sans SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(a.text, P[0][0], P[0][1] + r * 0.05); ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
     a._lb = [P[0][0] - r, P[0][1] - r, r * 2, r * 2];
   }
 }
 function annotText(text, x, y, a, s, c) {
   const fs = Math.max(9 * DPR, Math.min((a.size || 0) * s, 400 * DPR));
-  ctx.font = `${fs}px "Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.textBaseline = 'top';
+  ctx.font = `${fs}px "Noto Sans SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.textBaseline = 'top';
   const lines = String(text).split('\n'); const w = Math.max(...lines.map(l => ctx.measureText(l).width));
   const bg = R.bg === 'white' ? 'rgba(255,255,255,.8)' : 'rgba(0,0,0,.6)';
   ctx.fillStyle = bg; ctx.fillRect(x - 3, y - 2, w + 6, lines.length * fs * 1.25 + 4);
@@ -2252,6 +2255,72 @@ function cloudChanges(d) {
 }
 const DEFAULT_KEYS = { dist: '1', poly: '2', area: '3', areapick: '4', angle: '5', radius: '6', coord: '7', boxlen: '8', count: '9', zoomwin: 'W', text: 'T', cloud: 'Y', arrow: 'A', rect: 'R', line: 'L', num: 'N', erase: 'E', table: 'B', edittext: 'X', clip: 'C', stats: 'S', layers: 'G' };
 function keyMap() { const ks = { ...DEFAULT_KEYS, ...(state.settings.keys || {}) }; const m = {}; for (const [t, k] of Object.entries(ks)) if (k) m[k.toUpperCase()] = t; return m; }
+function sceneFontNames(sc) {
+  const s = new Set();
+  for (const sp of sc.spaces || []) for (const t of sp.texts || []) {
+    if (t.sf) s.add(t.sf);
+    if (t.bf) s.add(t.bf);
+    if (t.ff) s.add(t.ff);
+  }
+  return [...s];
+}
+async function loadSceneFonts(sc) {
+  const names = sceneFontNames(sc);
+  if (!names.length || !B.fontRead) return '';
+  try {
+    const info = await B.fontInfo(names);
+    state.fontCount = info.count;
+    state.fontDirs = info.dirs;
+    const have = names.filter(n => info.have[n]);
+    const rows = have.length ? await B.fontRead(have) : [];
+    let shx = 0;
+    for (const [name, bytes] of rows) {
+      if (!bytes) continue;
+      if (/\.shx$/i.test(name)) { try { if (installFont(name, bytes)) shx++; } catch (e) { console.warn(name, e); } }
+      else {
+        try {
+          const key = String(name).toLowerCase();
+          const fam = 'lp-' + key.replace(/[^a-z0-9]+/g, '');
+          const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+          const face = new FontFace(fam, buf);
+          await face.load();
+          document.fonts.add(face);
+          R.ttf.set(key, '"' + fam + '"');
+        } catch (e) { console.warn(name, e); }
+      }
+    }
+    const miss = names.filter(n => !info.have[n]);
+    if (miss.length) return tr('　这台电脑没有 {0}，已用软件自带的中文字体显示。', miss.slice(0, 6).join('、'));
+    if (shx) return tr('　已用本机 SHX 字体');
+    return '';
+  } catch (e) { console.warn(e); return ''; }
+}
+async function reloadOpenFonts() {
+  for (const d of state.docs) if (d.scene) await loadSceneFonts(d.scene);
+  redraw();
+}
+async function chooseFontDir() {
+  const r = await B.fontPickDir();
+  if (!r) return;
+  state.fontDirs = r.dirs;
+  state.fontCount = r.count;
+  await reloadOpenFonts();
+  if (state.side === 'help') refreshSide();
+  toast(tr('已改用字体文件夹：{0}（共 {1} 个）', r.dir, r.count), 5000);
+}
+async function copyFontsIn() {
+  const r = await B.fontCopy();
+  if (!r || !r.copied) { toast(tr('没有可复制的字体。请先选择字体文件夹。')); return; }
+  const info = await B.fontInfo([]);
+  state.fontCount = info.count;
+  state.fontDirs = info.dirs;
+  if (state.side === 'help') refreshSide();
+  toast(tr('已把 {0} 个字体复制到软件里。以后不插这块硬盘也能显示。', r.copied), 5000);
+}
+async function refreshFontInfo() {
+  if (!B.fontInfo) return;
+  try { const info = await B.fontInfo([]); state.fontCount = info.count; state.fontDirs = info.dirs; } catch (e) { /* 忽略 */ }
+}
 function helpPanel(body) {
   const sel = h('select'); for (const [v, n] of [['zh', '中文'], ['en', 'English']]) sel.append(h('option', { value: v, text: n })); sel.value = LANG;
   sel.onchange = () => {
@@ -2259,6 +2328,16 @@ function helpPanel(body) {
     try { sessionStorage.setItem('lpeek.reopen', JSON.stringify(state.docs.filter(d => d.kind === 'drawing' && d.path).map(d => d.path))); } catch (e) { /* 忽略 */ }
     location.reload();
   };
+  if (B.fontInfo) {
+    const dirs = state.fontDirs || [];
+    body.append(h('h4', { text: tr('CAD 字体'), style: 'margin:0 0 6px;font-size:12px;color:#5b6676' }));
+    body.append(h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;line-height:1.6;margin-bottom:8px', text: tr('软件自带中文字体。别人的电脑没有 hztxt.shx、gbcbig.shx 也能看清字。若要更接近 CAD 里的单线字，可选本机字体文件夹，只影响这一台电脑。') }));
+    body.append(h('div', { style: 'font-size:12px;line-height:1.5;margin-bottom:8px;word-break:break-all;white-space:pre-wrap', text: dirs.length ? dirs.join('\n') : tr('未选择本机字体文件夹。不选也能看字。') }));
+    body.append(h('div', { style: 'font-size:12px;margin-bottom:8px', text: tr('已找到 {0} 个字体文件', state.fontCount || 0) }));
+    body.append(h('div', { cls: 'row', style: 'margin-bottom:14px' },
+      h('button', { cls: 'btn primary', text: tr('选择字体文件夹'), onclick: chooseFontDir }),
+      h('button', { cls: 'btn', text: tr('复制到软件里'), onclick: copyFontsIn })));
+  }
   if (B.openGuide) body.append(h('button', { cls: 'btn primary', style: 'width:100%;margin-bottom:12px', text: tr('打开使用说明（PDF）'), onclick: async () => { const r = await B.openGuide(); if (r) toast(tr('无法打开使用说明：') + r); } }));
   body.append(h('label', { style: 'display:flex;flex-direction:column;gap:4px;margin-bottom:12px;font-size:12px;color:#5b6676' }, tr('界面语言（切换后界面会重新加载）'), sel));
   const keys = [[tr('滚轮'), tr('以光标为中心缩放')], [tr('左键拖动 / 中键拖动'), tr('平移')], [tr('Home / 双击中键'), tr('全图')], ['W', tr('窗口缩放')], [tr('右键 / 回车'), tr('结束连续测量、面积')], ['Esc', tr('退出当前工具')], ['F3', tr('对象捕捉开关')], ['F8', tr('正交开关')], ['Ctrl+Z', tr('撤销')], ['Ctrl+O', tr('打开')], ['Ctrl+F', tr('文字查找')], ['Ctrl+P', tr('打印')], ['Ctrl+Tab', tr('切换图纸')]];
@@ -2508,7 +2587,9 @@ function localizeStatic() {
   localizeStatic();
   if (B.setLang) B.setLang(LANG);
   buildToolbar(); refreshToolbar(); cv.className = 'pan';
+  try { await document.fonts.load('16px "Noto Sans SC"'); } catch (e) { /* 自带字体加载失败时仍用系统字体 */ }
   try { state.settings = Object.assign({ recent: [] }, await B.getSettings()); } catch (e) { /* ignore */ }
+  await refreshFontInfo();
   if (state.settings.bg === 'white') { R.bg = 'white'; $('#stage').style.background = '#fff'; }
   renderRecent(); refreshToolbar();
   B.onOpenFile((p) => openPath(p));

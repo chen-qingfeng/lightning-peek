@@ -16,7 +16,7 @@
 | CIRCLE, ARC, ELLIPSE | Yes | Arcs stay smooth at any zoom |
 | LWPOLYLINE, POLYLINE (2D/3D) | Yes | Bulges and constant width supported; mesh/polyface drawn as vertex chains |
 | SPLINE | Yes | NURBS from control points, or a smooth curve through fit points |
-| TEXT, ATTRIB | Yes | Alignment, width factor, oblique angle, mirroring |
+| TEXT, ATTRIB | Yes | Alignment, width factor, oblique angle, mirroring. SHX fonts (shapes, bigfont, unifont) are stroked from a local `.shx` folder when one is chosen; otherwise the bundled Noto Sans SC is used |
 | MTEXT | Yes | Paragraphs, wrapping and stacked fractions; inline font/colour changes are ignored |
 | INSERT (blocks, arrays) | Yes | Nested blocks up to 16 levels |
 | DIMENSION | Yes | Drawn from the dimension's own block |
@@ -61,7 +61,7 @@ Opening the 380 KB DWG above took about 1 second in headless Chromium inside a L
 | 圆、圆弧、椭圆 | 是 | 任意缩放下保持平滑 |
 | 多段线（二维/三维） | 是 | 支持凸度和全局宽度；网格按顶点连线显示 |
 | 样条曲线 | 是 | 按控制点计算 NURBS，或按拟合点生成平滑曲线 |
-| 单行文字、属性 | 是 | 对齐方式、宽度因子、倾斜角、镜像 |
+| 单行文字、属性 | 是 | 对齐方式、宽度因子、倾斜角、镜像。本机有 SHX 时按单线字绘制；没有时用软件自带的 Noto Sans SC |
 | 多行文字 | 是 | 段落、自动换行、堆叠分数；行内字体/颜色变化忽略 |
 | 图块（含阵列） | 是 | 最多 16 层嵌套 |
 | 标注 | 是 | 按标注自带的图块绘制 |

@@ -1,7 +1,14 @@
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("fonts/NotoSansSC-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
 :root {
   --bar: #f4f6f9; --bar-line: #dfe3ea; --ink: #1f2733; --ink2: #5b6676; --accent: #ffb400; --accent-ink: #1d2a3a;
   --blue: #2f6fde; --panel: #ffffff; --hover: #e8eef8; --active: #fff1c9; --danger: #d64545;
-  font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans CJK SC", sans-serif;
+  font-family: "Noto Sans SC", "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans CJK SC", sans-serif;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; height: 100dvh; overflow: hidden; color: var(--ink); font-size: 13px; user-select: none; touch-action: none; }

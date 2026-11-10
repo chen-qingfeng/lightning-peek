@@ -1,5 +1,6 @@
 // 闪电看图 · Canvas 渲染器
 import { OP, FG, FONT_FAMILIES } from './engine.js';
+import { fontLib, layoutShx } from './shx.js';
 
 export function buildPath(ops) {
   const p = new Path2D();
@@ -47,7 +48,7 @@ export function minv(m) {
   return [m[3] / d, -m[1] / d, -m[2] / d, m[0] / d, (m[2] * m[5] - m[3] * m[4]) / d, (m[1] * m[4] - m[0] * m[5]) / d];
 }
 
-const OLE_FONTS = '"Microsoft YaHei","SimSun","Noto Sans CJK SC","PingFang SC",sans-serif';
+const OLE_FONTS = '"Noto Sans SC","Microsoft YaHei","SimSun","Noto Sans CJK SC","PingFang SC",sans-serif';
 function oleFont(face) { return face && !/[",]/.test(face) ? '"' + face + '",' + OLE_FONTS : OLE_FONTS; }
 const measureCtx = (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(4, 4) : document.createElement('canvas')).getContext('2d');
 
@@ -189,8 +190,10 @@ export class Renderer {
       const Ux = M[0] * t.ux + M[2] * t.uy, Uy = M[1] * t.ux + M[3] * t.uy;
       const reach = (t._wl || t.s.length * t.h * 1.1 * t.wf) * Math.hypot(Ux, Uy) + hpx * 2;
       if (e + reach < vx0 || e - reach > vx1 || f + reach < vy0 || f - reach > vy1) continue;
-      if (curFont !== t.f) { ctx.font = '100px ' + FONT_FAMILIES[t.f]; curFont = t.f; }
-      if (t._w === undefined) { measureCtx.font = '100px ' + FONT_FAMILIES[t.f]; t._w = measureCtx.measureText(t.s).width; }
+      if ((t.sf || t.bf) && this.strokeShx(ctx, t, M, opt)) continue;
+      const fam = (this.ttf && t.ff && this.ttf.get(t.ff)) || FONT_FAMILIES[t.f] || FONT_FAMILIES[0];
+      if (curFont !== fam) { ctx.font = '100px ' + fam; curFont = fam; }
+      if (t._w === undefined || t._ff !== fam) { measureCtx.font = '100px ' + fam; t._w = measureCtx.measureText(t.s).width; t._ff = fam; }
       const em = t.h * 1.15, k = em / 100;
       t._wl = t._w * k * t.wf;
       let hx = t.wf * t.mx * k;
@@ -207,5 +210,40 @@ export class Renderer {
       ctx.fillText(t.s, gx, gy);
     }
     ctx.restore();
+  }
+
+  // 用 SHX 单线字画。字体还没载入、或大部分字不在字体里时返回 false，改画系统字体。
+  strokeShx(ctx, t, M, opt) {
+    const lay = layoutShx(t.s, t.sf && fontLib.get(t.sf), t.bf && fontLib.get(t.bf));
+    if (!lay || !(lay.width > 0)) return false;
+    const mx = t.mx || 1, my = t.my || 1;
+    let sx = (t.h / lay.up) * (t.wf || 1) * mx;
+    const sy = (t.h / lay.up) * my;
+    if (t.fit) sx = t.fit / lay.width * mx;
+    const ox = t.fit ? 0 : t.ha === 1 ? -lay.width / 2 : t.ha === 2 ? -lay.width : 0;
+    const oy = t.va === 1 ? lay.down : t.va === 2 ? -(lay.up - lay.down) / 2 : t.va === 3 ? -lay.up : 0;
+    const tan = Math.tan(t.obl || 0);
+    const hpx = t.h * Math.hypot(M[0] * t.vx + M[2] * t.vy, M[1] * t.vx + M[3] * t.vy);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.beginPath();
+    ctx.strokeStyle = this.colorOf(t.color, opt.color);
+    ctx.lineWidth = Math.max((opt.dpr || 1), hpx * 0.045);
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    for (const pl of lay.lines) {
+      for (let i = 0; i < pl.length; i += 2) {
+        const gx = pl[i] + ox + (pl[i + 1] + oy) * tan;
+        const gy = pl[i + 1] + oy;
+        const wx = t.x + t.ux * gx * sx + t.vx * gy * sy;
+        const wy = t.y + t.uy * gx * sx + t.vy * gy * sy;
+        const px = M[0] * wx + M[2] * wy + M[4];
+        const py = M[1] * wx + M[3] * wy + M[5];
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+    }
+    ctx.stroke();
+    ctx.restore();
+    return true;
   }
 }

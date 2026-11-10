@@ -2,6 +2,17 @@
 // 中文原文即词条键；英文缺词时退回中文。语言按系统自动选择，可在「帮助」里切换。
 export const EN = {
  "打开使用说明（PDF）": "Open the user guide (PDF, Chinese)",
+ "CAD 字体": "CAD fonts",
+ "软件自带中文字体。别人的电脑没有 hztxt.shx、gbcbig.shx 也能看清字。若要更接近 CAD 里的单线字，可选本机字体文件夹，只影响这一台电脑。": "A Chinese font is built in, so text is readable on computers that do not have hztxt.shx or gbcbig.shx. Choose a local font folder only when you want the lettering closer to CAD single-line text. That choice affects this computer only.",
+ "未选择本机字体文件夹。不选也能看字。": "No local font folder selected. Text is still readable.",
+ "已找到 {0} 个字体文件": "{0} font files found",
+ "选择字体文件夹": "Choose font folder",
+ "复制到软件里": "Copy into the app",
+ "已改用字体文件夹：{0}（共 {1} 个）": "Using font folder {0} ({1} files)",
+ "没有可复制的字体。请先选择字体文件夹。": "No fonts to copy. Choose a font folder first.",
+ "已把 {0} 个字体复制到软件里。以后不插这块硬盘也能显示。": "Copied {0} fonts into the app. Text still shows if that drive is unplugged.",
+ "　这台电脑没有 {0}，已用软件自带的中文字体显示。": " This computer does not have {0}. Text is shown with the Chinese font built into the app.",
+ "　已用本机 SHX 字体": " Using SHX fonts from this computer",
  "无法打开使用说明：": "Could not open the user guide: ",
  "另存为 DWG 只在桌面版里可用": "Save as DWG is only available in the desktop app",
  "另存为 DWG": "Save as DWG",

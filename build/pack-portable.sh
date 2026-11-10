@@ -3,7 +3,7 @@
 # 需要 NSIS 3（makensis），用法同 build/pack-installer.sh：可设置 MAKENSIS、NSISDIR。
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-VER="$(python3 -c "import json;print(json.load(open('$HERE/app/package.json'))['version'])")"
+VER="$(node -p "require('$HERE/app/package.json').version")"
 SRC="$HERE/dist/LightningPeek-$VER-win-x64"
 OUT="$HERE/dist/LightningPeek-$VER-portable.exe"
 MAKENSIS="${MAKENSIS:-makensis}"

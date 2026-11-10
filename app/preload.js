@@ -6,7 +6,7 @@ const queued = [];
 ipcRenderer.on('open-file', (e, p) => { if (openCb) openCb(p); else queued.push(p); });
 
 contextBridge.exposeInMainWorld('sdkt', {
-  version: '0.1.6',
+  version: '0.1.7',
   openDialog: (opt) => ipcRenderer.invoke('open-dialog', opt || {}),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   readText: (p) => ipcRenderer.invoke('read-text', p),
@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('sdkt', {
   openAny: (opt) => ipcRenderer.invoke('open-any', opt || {}),
   getSettings: () => ipcRenderer.invoke('get-settings'),
   setSettings: (s) => ipcRenderer.invoke('set-settings', s),
+  fontInfo: (names) => ipcRenderer.invoke('font-info', names || []),
+  fontRead: (names) => ipcRenderer.invoke('font-read', names || []),
+  fontPickDir: () => ipcRenderer.invoke('font-pick-dir'),
+  fontCopy: () => ipcRenderer.invoke('font-copy'),
   saveBytes: (name, bytes) => ipcRenderer.invoke('save-bytes', name, bytes),
   exportPdf: (o) => ipcRenderer.invoke('export-pdf', o),
   printImage: (o) => ipcRenderer.invoke('print-image', o),
