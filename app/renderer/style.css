@@ -42,7 +42,9 @@ button { font: inherit; color: inherit; }
 .side-head .x { background: none; border: none; color: #cfd6e0; font-size: 18px; cursor: pointer; }
 #side-body { flex: 1; overflow: auto; padding: 8px; }
 #stage { flex: 1; position: relative; min-width: 0; background: #000; }
-#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: default; touch-action: none; }
+#cv, #ov { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#cv { cursor: default; touch-action: none; }
+#ov { pointer-events: none; }
 #cv.pan { cursor: grab; } #cv.panning { cursor: grabbing; } #cv.cross { cursor: crosshair; } #cv.pick { cursor: pointer; }
 
 #empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: linear-gradient(160deg, #f7f9fc, #e6ecf4); }

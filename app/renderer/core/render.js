@@ -14,6 +14,15 @@ export function buildPath(ops) {
   }
   return p;
 }
+function localView(M, rect, pad) {
+  const inv = minv(M);
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const x of [rect[0], rect[2]]) for (const y of [rect[1], rect[3]]) {
+    const p = mapply(inv, x, y);
+    if (p[0] < x0) x0 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[0] > x1) x1 = p[0]; if (p[1] > y1) y1 = p[1];
+  }
+  return [x0 - pad, y0 - pad, x1 + pad, y1 + pad];
+}
 function ringsPath(rings, g0, g1) {
   const p = new Path2D();
   for (let k = g0; k < g1; k++) {
@@ -64,12 +73,14 @@ export class Renderer {
     const dpr = opt.dpr || 1;
     const px = Math.max(1, dpr * 0.9) * this.lineScale;
     const over = opt.color;
+    const view = localView(M, viewRect, 8 / Math.max(s, 1e-9));
+    const culled = (bb, nocull) => !nocull && bb && Number.isFinite(bb[0]) && (bb[2] < view[0] || bb[0] > view[2] || bb[3] < view[1] || bb[1] > view[3]);
     ctx.save();
     ctx.setTransform(M[0], M[1], M[2], M[3], M[4], M[5]);
     ctx.lineJoin = 'round';
     // 填充
     for (const F of P.fills) {
-      const f = F.f; if (!this.visible(f.layer)) continue;
+      const f = F.f; if (!this.visible(f.layer) || culled(f.bb)) continue;
       if (!F.paths) { F.paths = []; for (let g = 0; g < f.groups.length; g += 2) F.paths.push(ringsPath(f.rings, f.groups[g], f.groups[g + 1])); }
       ctx.globalAlpha = (opt.alpha ?? 1) * f.alpha;
       ctx.fillStyle = this.colorOf(f.color, over);
@@ -78,7 +89,7 @@ export class Renderer {
     ctx.globalAlpha = opt.alpha ?? 1;
     // 线
     for (const B of P.batches) {
-      const b = B.b; if (!this.visible(b.layer)) continue;
+      const b = B.b; if (!this.visible(b.layer) || culled(b.bb, b.nocull)) continue;
       if (!B.path) B.path = buildPath(b.ops);
       ctx.strokeStyle = this.colorOf(b.color, over);
       if (b.w < 0) { ctx.lineWidth = 3 * px / s; ctx.lineCap = 'round'; }
