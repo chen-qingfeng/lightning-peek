@@ -267,7 +267,7 @@ function applyTextEdits(doc) {
   for (const sp of doc.scene.spaces) {
     sp._txIdx = null;
     for (const t of sp.texts) {
-      t._qb = undefined;
+      t._qb = undefined; t._w = undefined; t.sr = undefined;
       if (!t.hd || doc.textEdits[t.hd] === undefined) continue;
       if (t._orig === undefined) t._orig = t.s;
       const lines = String(doc.textEdits[t.hd]).split('\n');

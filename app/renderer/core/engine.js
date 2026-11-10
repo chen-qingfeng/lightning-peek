@@ -267,6 +267,21 @@ function ocsMatrix(r) {
 function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
 function norm(a) { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; }
 
+// 结构图（探索者 tssdeng.shx、盈建科 yjkeng.shx 等）的特殊字符 %%130–%%143 在这些 SHX 字体里才有字形。
+// 没有这些 SHX 时普通字体画不出 130–143 号字符：钢筋符号改用通行的等级字母 A=HPB300、B=HRB335、
+// C=HRB400、D=RRB400（如 C8@200）；%%140…%%141 是上标、%%142…%%143 是下标（m%%1402%%141 → m²）。
+const REBAR = { '\x82': 'A', '\x83': 'B', '\x84': 'C', '\x85': 'D' };
+const SUPS = { 0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹', '-': '⁻', '+': '⁺' };
+const SUBS = { 0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉', '-': '₋', '+': '₊' };
+const conv = (t, map) => [...t].every(c => map[c]) ? [...t].map(c => map[c]).join('') : t;
+export function rebarText(s) {
+  if (!/[\x82-\x85\x8c-\x8f]/.test(s)) return s;
+  return s.replace(/\x8c([^\x8c-\x8f]*)(\x8d|$)/g, (_, t) => conv(t, SUPS))
+    .replace(/\x8e([^\x8c-\x8f]*)(\x8f|$)/g, (_, t) => conv(t, SUBS))
+    .replace(/[\x8c-\x8f]/g, '')
+    .replace(/[\x82-\x85]/g, c => REBAR[c]);
+}
+
 // ---------- 文本清理 ----------
 export function cleanText(s) {
   if (!s) return '';
@@ -1246,6 +1261,7 @@ export class SceneSink {
     this._box(bt.bb, a[0], a[1]); this._box(bt.bb, b[0], b[1]);
   }
   text(s, it) {
+    if (/[\x82-\x85\x8c-\x8f]/.test(it.s)) { it.sr = it.s; it.s = rebarText(it.s); } // 结构特殊字符：显示/搜索用可读字符，SHX 字体用原字符
     this.texts.push(it);
     const L = approxWidth(it.s, it.h) * it.wf;
     this._bb(it.x, it.y); this._bb(it.x + it.ux * L, it.y + it.uy * L);

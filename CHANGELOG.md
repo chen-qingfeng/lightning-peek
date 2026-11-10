@@ -13,6 +13,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
   - tables (`TCH_SHEET`) with merged cells;
   - dimension chains (`TCH_DIMENSION2`).
   TArch markup `^U2^U`, `^U3^U` and `^C1^C` shows as ², ³ and ①. Walls, columns, stairs, handrails and slabs are still not shown.
+- Structural drawings (探索者 `tssdeng.shx`, 盈建科 `yjkeng.shx` fonts): steel-bar symbols `%%130`–`%%133` were blank when those SHX fonts are not installed. They now show as the grade letters A/B/C/D (HPB300/HRB335/HRB400/RRB400, e.g. `C8@200`), and `%%140…%%141` / `%%142…%%143` as superscript / subscript (`kN/m²`). With the SHX fonts in the font folder the original glyphs are drawn. Search and table export use the readable form.
 - Long Chinese MTEXT in pre-2007 DWG no longer turns into garbage halfway through. LibreDWG splits MTEXT into 250-byte pieces and could cut a double-byte character in two.
 
 ### Changed

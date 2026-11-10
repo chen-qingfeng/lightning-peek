@@ -52,6 +52,7 @@ const OLE_FONTS = '"Noto Sans SC","Microsoft YaHei","SimSun","Noto Sans CJK SC",
 function oleFont(face) { return face && !/[",]/.test(face) ? '"' + face + '",' + OLE_FONTS : OLE_FONTS; }
 const measureCtx = (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(4, 4) : document.createElement('canvas')).getContext('2d');
 
+
 export class Renderer {
   constructor() { this.bg = 'black'; this.layerOn = new Map(); this.prepared = new WeakMap(); this.highlight = null; this.lineScale = 1; this.showText = true; }
   prepare(space) {
@@ -214,7 +215,7 @@ export class Renderer {
 
   // 用 SHX 单线字画。字体还没载入、或大部分字不在字体里时返回 false，改画系统字体。
   strokeShx(ctx, t, M, opt) {
-    const lay = layoutShx(t.s, t.sf && fontLib.get(t.sf), t.bf && fontLib.get(t.bf));
+    const lay = layoutShx(t.sr || t.s, t.sf && fontLib.get(t.sf), t.bf && fontLib.get(t.bf));
     if (!lay || !(lay.width > 0)) return false;
     const mx = t.mx || 1, my = t.my || 1;
     let sx = (t.h / lay.up) * (t.wf || 1) * mx;
