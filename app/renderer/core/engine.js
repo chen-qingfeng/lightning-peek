@@ -105,6 +105,11 @@ export function encodeLegacy(text, enc) {
   return out.subarray(0, n);
 }
 
+// AutoCAD 英文版默认布局叫 Layout1。底部标签改成布局1，图纸里另起的名字不动。
+export function layoutTitle(name) {
+  const m = String(name || '').trim().match(/^layout\s*(\d*)$/i);
+  return m ? '布局' + m[1] : name;
+}
 // LibreDWG 偶尔把 UTF-8 字节当 GBK 再转一遍（如「布局1」→「甯冨眬1」），这里反向修复
 let GBK_ENC = null;
 export function fixMojibake(s) {
@@ -223,7 +228,7 @@ export function parseDxf(text) {
             let nm = '';
             for (let i = sub; i < r.c.length; i++) if (r.c[i] === 1) { nm = r.v[i].trim(); break; }
             const blk = r.all(330).map(s => s.trim().toUpperCase());
-            doc.layouts.push({ name: fixMojibake(nm), order: r.i(71), blockHandles: blk });
+            doc.layouts.push({ name: layoutTitle(fixMojibake(nm)), order: r.i(71), blockHandles: blk });
           }
         }
         p++;

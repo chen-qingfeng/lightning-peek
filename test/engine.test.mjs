@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseDxf, buildScene, decodeDxf, OP, drawnWidth } from '../app/renderer/core/engine.js';
+import { parseDxf, buildScene, decodeDxf, OP, drawnWidth, layoutTitle } from '../app/renderer/core/engine.js';
 import { makeXlsx } from '../app/renderer/core/xlsx.js';
 
 const sample = (n) => fs.readFileSync(new URL('../docs/samples/' + n, import.meta.url));
@@ -159,4 +159,8 @@ test('named layouts stay in the scene even when the sheet is empty', () => {
     '0', 'ENDSEC', '0', 'EOF'].join('\n');
   const names = buildScene(parseDxf(dxf)).spaces.map(s => s.name);
   assert.deepEqual(names, ['模型', '布局1']);
+  const en = dxf.replace('1\n布局1\n', '1\nLayout1\n');
+  assert.deepEqual(buildScene(parseDxf(en)).spaces.map(s => s.name), ['模型', '布局1']);
+  assert.equal(layoutTitle('Layout2'), '布局2');
+  assert.equal(layoutTitle('封面'), '封面');
 });

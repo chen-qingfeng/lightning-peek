@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.2] – Preview – 2026-11-10
+
+### Fixed
+- The default English layout name `Layout1` is shown as 布局1 (and `Layout2` as 布局2). A layout with its own name is left as written in the drawing.
+
 ## [0.2.1] – Preview – 2026-11-10
 
 ### Fixed
