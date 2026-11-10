@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.3] – Preview – 2026-11-10
+
+### Changed
+- Fonts are resolved from the computer, not bundled. On open, Lightning Peek looks in a chosen folder, AutoCAD's Fonts directory, and Windows Fonts. A missing `hztxt.shx` can use `gbcbig.shx` and the reverse; `simplex.shx`, `txt.shx` and `complex.shx` stand in for each other; `simsun.ttf` uses `simsun.ttc` when that is what Windows installed. Structural bar fonts are not replaced by a normal bigfont. If none of these files are present, the built-in Chinese font is used. Choosing a font folder stays optional.
+
 ## [0.2.2] – Preview – 2026-11-10
 
 ### Fixed

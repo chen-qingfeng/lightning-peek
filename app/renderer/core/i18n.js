@@ -3,6 +3,9 @@
 export const EN = {
  "打开使用说明（PDF）": "Open the user guide (PDF, Chinese)",
  "CAD 字体": "CAD fonts",
+ "打开图纸就会自动找本机字体：先用图纸里写的文件；没有时 hztxt.shx 与 gbcbig.shx 互相替，西文 simplex.shx、txt.shx、complex.shx 互相替；宋体、黑体用 Windows 里已经安装的。这些字体不随软件分发。都没有时用软件自带的中文。下面的文件夹可以不选。": "On open, the app looks for fonts already on this computer: the file named in the drawing first; then hztxt.shx stands in for gbcbig.shx and the reverse; simplex.shx, txt.shx and complex.shx stand in for each other; SimSun and SimHei come from Windows if they are installed. Those fonts are not bundled. Otherwise the built-in Chinese font is used. The folder below is optional.",
+ "这台电脑上还没找到 AutoCAD 或 Windows 字体目录。不选也能看字。": "No AutoCAD or Windows font folder was found on this computer. Text is still readable.",
+ "没有需要复制的字体。本机 AutoCAD 和 Windows 里的字体会自动使用。": "Nothing needs to be copied. Fonts already in AutoCAD or Windows are used automatically.",
  "软件自带中文字体。别人的电脑没有 hztxt.shx、gbcbig.shx 也能看清字。若要更接近 CAD 里的单线字，可选本机字体文件夹，只影响这一台电脑。": "A Chinese font is built in, so text is readable on computers that do not have hztxt.shx or gbcbig.shx. Choose a local font folder only when you want the lettering closer to CAD single-line text. That choice affects this computer only.",
  "未选择本机字体文件夹。不选也能看字。": "No local font folder selected. Text is still readable.",
  "已找到 {0} 个字体文件": "{0} font files found",

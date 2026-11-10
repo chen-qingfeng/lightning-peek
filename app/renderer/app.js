@@ -2319,7 +2319,7 @@ async function chooseFontDir() {
 }
 async function copyFontsIn() {
   const r = await B.fontCopy();
-  if (!r || !r.copied) { toast(tr('没有可复制的字体。请先选择字体文件夹。')); return; }
+  if (!r || !r.copied) { toast(tr('没有需要复制的字体。本机 AutoCAD 和 Windows 里的字体会自动使用。')); return; }
   const info = await B.fontInfo([]);
   state.fontCount = info.count;
   state.fontDirs = info.dirs;
@@ -2340,8 +2340,8 @@ function helpPanel(body) {
   if (B.fontInfo) {
     const dirs = state.fontDirs || [];
     body.append(h('h4', { text: tr('CAD 字体'), style: 'margin:0 0 6px;font-size:12px;color:#5b6676' }));
-    body.append(h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;line-height:1.6;margin-bottom:8px', text: tr('软件自带中文字体。别人的电脑没有 hztxt.shx、gbcbig.shx 也能看清字。若要更接近 CAD 里的单线字，可选本机字体文件夹，只影响这一台电脑。') }));
-    body.append(h('div', { style: 'font-size:12px;line-height:1.5;margin-bottom:8px;word-break:break-all;white-space:pre-wrap', text: dirs.length ? dirs.join('\n') : tr('未选择本机字体文件夹。不选也能看字。') }));
+    body.append(h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;line-height:1.6;margin-bottom:8px', text: tr('打开图纸就会自动找本机字体：先用图纸里写的文件；没有时 hztxt.shx 与 gbcbig.shx 互相替，西文 simplex.shx、txt.shx、complex.shx 互相替；宋体、黑体用 Windows 里已经安装的。这些字体不随软件分发。都没有时用软件自带的中文。下面的文件夹可以不选。') }));
+    body.append(h('div', { style: 'font-size:12px;line-height:1.5;margin-bottom:8px;word-break:break-all;white-space:pre-wrap', text: dirs.length ? dirs.join('\n') : tr('这台电脑上还没找到 AutoCAD 或 Windows 字体目录。不选也能看字。') }));
     body.append(h('div', { style: 'font-size:12px;margin-bottom:8px', text: tr('已找到 {0} 个字体文件', state.fontCount || 0) }));
     body.append(h('div', { cls: 'row', style: 'margin-bottom:14px' },
       h('button', { cls: 'btn primary', text: tr('选择字体文件夹'), onclick: chooseFontDir }),

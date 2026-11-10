@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { execFile } = require('child_process');
+const { fontCandidates } = require('./fontnames.cjs');
 
 const APP_NAME = '闪电看图';
 let LANG = 'zh';
@@ -131,9 +132,14 @@ ipcMain.handle('open-any', async (e, opt = {}) => {
 });
 ipcMain.handle('get-settings', () => { const s = loadSettings(); delete s.window; return s; });
 
-// ---- 本机 SHX / TTF 字体。不把字体文件打进安装包，按文件名到用户指定的文件夹里取。----
+// ---- 本机 SHX / TTF 字体。不把 hztxt、gbcbig、宋体打进安装包。----
+// 查找顺序：用户选的文件夹 > 复制进软件的字体 > AutoCAD 的 Fonts > Windows 字体 > 本机已有的字体目录。
 const FONT_EXT = /\.(shx|ttf|otf|ttc)$/i;
 let fontCache = null;
+function windowsFontDir() {
+  if (process.platform !== 'win32') return '';
+  return path.join(process.env.WINDIR || 'C:\\Windows', 'Fonts');
+}
 function autoFontDirs() {
   const out = [];
   const seen = new Set();
@@ -147,26 +153,44 @@ function autoFontDirs() {
       add(L + ':\\CAD软件大全\\CAD万能字体');
       add(L + ':\\CAD万能字体');
     }
+    add(windowsFontDir());
     for (const r of [process.env.ProgramFiles, process.env['ProgramFiles(x86)']].filter(Boolean)) {
-      let subs = [];
-      try { subs = fs.readdirSync(path.join(r, 'Autodesk')); } catch (e) { continue; }
-      for (const d of subs) if (/autocad/i.test(d)) add(path.join(r, 'Autodesk', d, 'Fonts'));
+      let companies = [];
+      try { companies = fs.readdirSync(r); } catch (e) { continue; }
+      for (const c of companies) {
+        if (!/autodesk|zwsoft|gstar|gstarcad/i.test(c)) continue;
+        let subs = [];
+        try { subs = fs.readdirSync(path.join(r, c), { withFileTypes: true }); } catch (e) { continue; }
+        for (const d of subs) {
+          if (!d.isDirectory()) continue;
+          add(path.join(r, c, d.name, 'Fonts'));
+          add(path.join(r, c, d.name, 'fonts'));
+        }
+      }
     }
   }
   return out;
 }
 function fontDirs() {
   const s = loadSettings();
-  const local = path.join(DATA, 'fonts');
   const dirs = [];
-  if (fs.existsSync(local)) dirs.push(local);
-  const chosen = Array.isArray(s.fontDirs) ? s.fontDirs.filter(d => typeof d === 'string' && fs.existsSync(d)) : [];
-  if (!s.fontDirs) {
-    const found = autoFontDirs();
-    if (found.length) { s.fontDirs = found; saveSettings(s); }
-    dirs.push(...found);
-  } else dirs.push(...chosen);
+  const push = (p) => {
+    if (!p || dirs.includes(p)) return;
+    try { if (fs.existsSync(p) && fs.statSync(p).isDirectory()) dirs.push(p); } catch (e) { /* 忽略 */ }
+  };
+  // 后面的目录覆盖前面的同名文件，所以用户选的文件夹最后加入。
+  for (const d of autoFontDirs()) push(d);
+  push(path.join(DATA, 'fonts'));
+  const chosen = Array.isArray(s.fontDirs) ? s.fontDirs : [];
+  for (const d of chosen) if (typeof d === 'string') push(d);
   return dirs;
+}
+function resolveFont(map, name) {
+  for (const c of fontCandidates(name)) {
+    const p = map.get(c);
+    if (p) return p;
+  }
+  return null;
 }
 function walkFonts(dir, map, depth, overwrite) {
   if (depth > 5) return;
@@ -194,15 +218,15 @@ function forgetFonts() { fontCache = null; }
 ipcMain.handle('font-info', (e, names) => {
   const map = fontMap();
   const have = {};
-  for (const n of names || []) have[n] = map.has(String(n).toLowerCase());
+  for (const n of names || []) have[n] = !!resolveFont(map, n);
   const s = loadSettings();
-  return { dirs: s.fontDirs || [], count: map.size, have };
+  return { dirs: fontDirs(), chosen: s.fontDirs || [], count: map.size, have };
 });
 ipcMain.handle('font-read', (e, names) => {
   const map = fontMap();
   const out = [];
   for (const n of (names || []).slice(0, 80)) {
-    const p = map.get(String(n).toLowerCase());
+    const p = resolveFont(map, n);
     if (!p) { out.push([n, null]); continue; }
     try {
       const st = fs.statSync(p);
@@ -221,13 +245,17 @@ ipcMain.handle('font-pick-dir', async () => {
   s.fontDirs = dirs;
   saveSettings(s);
   forgetFonts();
-  return { dir: r.filePaths[0], dirs, count: fontMap().size };
+  return { dir: r.filePaths[0], dirs: fontDirs(), count: fontMap().size };
 });
 ipcMain.handle('font-copy', () => {
   const dest = path.join(DATA, 'fonts');
   fs.mkdirSync(dest, { recursive: true });
+  const sys = windowsFontDir();
+  const sysResolved = sys ? path.resolve(sys) : '';
   let n = 0;
   for (const [name, src] of fontMap()) {
+    const srcResolved = path.resolve(src);
+    if (sysResolved && (srcResolved === sysResolved || srcResolved.startsWith(sysResolved + path.sep))) continue;
     const to = path.join(dest, name);
     if (path.resolve(src) === path.resolve(to)) continue;
     try {
