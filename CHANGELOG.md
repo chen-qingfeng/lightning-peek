@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.0] – Preview – 2026-11-10
+
+### Fixed
+- Coordinate labels that break on `^J` keep the character size of the whole label. Each line is no longer stretched across the full width on its own, which made the glyphs look small and the gaps too wide. The next line sits one text height below, instead of the looser multiline spacing. Aligned text (between two points) scales its height with its width so the letters stay in proportion.
+
 ## [0.1.10] – Preview – 2026-11-10
 
 ### Fixed

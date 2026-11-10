@@ -117,20 +117,22 @@ test('rebar codes %%130-%%133 keep SHX bytes, draw as marks, and search as grade
   assert.ok(d.verts.every(v => v[3] === -3.5 && v[1] === a.verts[0][1]));
 });
 
-test('caret ^M^J splits a coordinate onto two lines that each keep the fitted width', () => {
+test('caret ^M^J keeps one character size and a one-height line gap', () => {
   const dxf = ['0', 'SECTION', '2', 'ENTITIES',
-    '0', 'TEXT', '8', '0', '10', '0', '20', '0', '11', '30', '21', '0', '40', '3', '72', '5', '1', 'X=1^M^JY=2',
+    '0', 'TEXT', '8', '0', '10', '0', '20', '0', '11', '30', '21', '0', '40', '3', '72', '5', '1', 'X=12^M^JY=3',
+    '0', 'TEXT', '8', '0', '10', '0', '20', '5', '11', '40', '21', '5', '40', '2', '72', '3', '1', 'AB',
     '0', 'MTEXT', '8', '0', '10', '0', '20', '10', '40', '2.5', '1', '\\T2;AB',
     '0', 'ENDSEC', '0', 'EOF'].join('\n');
   const texts = buildScene(parseDxf(dxf)).spaces[0].texts;
-  const x = texts.find(t => t.s === 'X=1');
-  const y = texts.find(t => t.s === 'Y=2');
+  const x = texts.find(t => t.s === 'X=12');
+  const y = texts.find(t => t.s === 'Y=3');
   assert.ok(x && y);
-  assert.equal(x.para, 'X=1\nY=2');
-  assert.ok(y.y < x.y);
-  assert.equal(x.fit, 30);
-  assert.equal(y.fit, 30);
-  const m = texts.find(t => t.s === 'AB');
-  assert.ok(m);
-  assert.ok(Math.abs(m.wf - 2) < 1e-9);
+  assert.equal(x.para, 'X=12\nY=3');
+  assert.ok(Math.abs((x.y - y.y) - x.h) < 1e-6);
+  assert.equal(x.h, 3);
+  assert.ok(y.fit < x.fit && x.fit < 30);
+  const aligned = texts.find(t => t.s === 'AB' && t.y === 5);
+  assert.ok(aligned.h > 2);
+  const m = texts.find(t => t.s === 'AB' && t.mt);
+  assert.ok(m && Math.abs(m.wf - 2) < 1e-9);
 });

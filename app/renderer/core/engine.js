@@ -932,23 +932,30 @@ function emitText(ctx, r, m, s) {
   let rot = r.f(50) * Math.PI / 180;
   const gen = r.i(71, 0);
   let anchor = (ha || va) ? p2 : p1;
-  let fitW = 0;
-  if (ha === 3 || ha === 5) { // 对齐 / 布满：两点之间
+  let fitW = 0, align = false;
+  if (ha === 3 || ha === 5) { // 3 对齐：字高随宽度一起变。5 布满：只变字宽。
+    align = ha === 3;
     rot = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]);
     fitW = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
     anchor = p1; ha = 0; va = 0;
   } else if (ha === 4) { ha = 1; va = 2; }
+  const visible = lines.filter(t => t);
+  const nat = (ln) => approxWidth(ln, h) * wf;
+  const longest = visible.reduce((a, ln) => Math.max(a, nat(ln)), 0);
+  // 换行后仍按「整段标注」的字号。对齐时字高跟着变，避免字又小、间距又被拉满。
+  let hh = h;
+  if (align && longest > 0 && fitW > 0) hh = h * (fitW / longest);
+  const fitBase = (!align && fitW > 0) ? fitW / Math.max(nat(visible.join('')), 1e-9) : (align && longest > 0 ? fitW / longest : 0);
   const n = lines.length;
-  const lh = h * 5 / 3;
-  const fit = fitW > 0 ? fitW * Math.sqrt(Math.abs(det(m))) : 0;
+  const lh = hh; // ^J 的下一行基线只隔一个字高，不用多行文字的 5/3 行距
+  const mscale = Math.sqrt(Math.abs(det(m)));
   lines.forEach((ln, i) => {
     if (!ln) return;
-    // 每一行单独布满两点之间，字距才能散开；整段粘在一起时会被挤到同一段长度里
-    const item = textItem(m, anchor[0], anchor[1], rot, h, wf, obl, ha, va, ln, fontFor(doc, r.s(7)), s, gen, -i * lh);
+    const item = textItem(m, anchor[0], anchor[1], rot, hh, wf, obl, ha, va, ln, fontFor(doc, r.s(7)), s, gen, -i * lh);
     Object.assign(item, styleFace(style));
     item.hd = r.s(5); if (ctx.depth) item.blk = 1;
     if (n > 1) { item.mt = 1; item.li = i; item.ln = n; if (i === 0) item.para = lines.join('\n'); }
-    if (fit > 0) item.fit = fit;
+    if (fitBase > 0) item.fit = nat(ln) * fitBase * mscale;
     ctx.sink.text(s, item);
   });
 }
