@@ -22,7 +22,13 @@ function browserBridge() {
 
 // ---------------- 状态 ----------------
 const $ = (s) => document.querySelector(s);
-let cv = $('#cv'); let ctx = cv.getContext('2d');
+const sCv = $('#cv'), oCv = $('#ov');
+let cv = sCv;
+let sctx = sCv.getContext('2d', { alpha: false });
+let octx = oCv.getContext('2d');
+let ctx = sctx;
+let painted = null;
+let chromeTimer = 0;
 const R = new Renderer();
 const state = { docs: [], cur: null, tool: null, snap: true, ortho: false, settings: { recent: [] }, side: null, mouse: null, hover: null, tmp: [], tmpArc: new Set(), batchSel: [], dirty: false, flash: null, hideMarks: false };
 let worker = null, rpcId = 1; const pending = new Map();
@@ -255,14 +261,19 @@ async function openBytes(name, bytes, path, opt = {}) {
 }
 // 国内图纸的 $INSUNITS 常被误设为英寸；只在英制图纸（MEASUREMENT=0）里才信英寸/英尺
 function applyTextEdits(doc) {
-  for (const sp of doc.scene.spaces) for (const t of sp.texts) {
-    if (!t.hd || doc.textEdits[t.hd] === undefined) continue;
-    if (t._orig === undefined) t._orig = t.s;
-    const lines = String(doc.textEdits[t.hd]).split('\n');
-    if (t.mt) { const n = t.ln || 1; t.s = t.li === n - 1 ? lines.slice(t.li).join(' ') : (lines[t.li] ?? ''); }
-    else t.s = lines.join(' ');
-    t._w = undefined; t._wl = undefined;
+  for (const sp of doc.scene.spaces) {
+    sp._txIdx = null;
+    for (const t of sp.texts) {
+      t._qb = undefined;
+      if (!t.hd || doc.textEdits[t.hd] === undefined) continue;
+      if (t._orig === undefined) t._orig = t.s;
+      const lines = String(doc.textEdits[t.hd]).split('\n');
+      if (t.mt) { const n = t.ln || 1; t.s = t.li === n - 1 ? lines.slice(t.li).join(' ') : (lines[t.li] ?? ''); }
+      else t.s = lines.join(' ');
+      t._w = undefined; t._wl = undefined;
+    }
   }
+  touchScene();
 }
 // 判断 1 个图纸单位是多少毫米。依据按可信度排列：
 // 1) 图上「L=xx」管长标注与旁边线段长度的比例（标注按米写）；2) 文件头声明的单位（米、厘米、英寸等）；
@@ -368,11 +379,17 @@ function renderTabs() {
     el.appendChild(t);
   }
 }
+function releaseWorker(d) {
+  if (!d || d.kind !== 'drawing') return;
+  rpc({ cmd: 'close', doc: d.id }).catch(() => { });
+  if (d.xrefDocs) for (const x of d.xrefDocs.values()) if (x.doc) rpc({ cmd: 'close', doc: x.doc.id }).catch(() => { });
+  d.xrefDocs = null;
+}
 function closeDoc(d) {
   const i = state.docs.indexOf(d); if (i < 0) return;
   if (d._dirty) { clearTimeout(d._saveTimer); d._dirty = false; const p = sidecarPath(d); if (p) B.writeText(p, sidecarJson(d)).catch(() => { }); }
   state.docs.splice(i, 1);
-  if (d.kind === 'drawing') rpc({ cmd: 'close', doc: d.id }).catch(() => { });
+  releaseWorker(d);
   if (state.cur === d) activate(state.docs[Math.min(i, state.docs.length - 1)] || null); else renderTabs();
   if (!state.docs.length) renderRecent();
 }
@@ -394,9 +411,10 @@ function renderSpaceTabs() {
 function view() { const d = state.cur; return d && d.views[d.spaceIdx]; }
 function sizeCanvas() {
   DPR = window.devicePixelRatio || 1;
-  const r = cv.getBoundingClientRect();
+  if (cv !== sCv) return;
+  const r = sCv.getBoundingClientRect();
   const w = Math.max(1, Math.round(r.width * DPR)), h = Math.max(1, Math.round(r.height * DPR));
-  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  if (sCv.width !== w || sCv.height !== h) { sCv.width = w; sCv.height = h; oCv.width = w; oCv.height = h; painted = null; }
 }
 // 屏幕旋转（每次 90°）与镜像：局部坐标增量 → 屏幕增量的 2×2 正交矩阵 [a, b, c, d]
 function basis(d = state.cur) {
@@ -446,22 +464,55 @@ function zoomAt(px, py, f) {
 }
 
 // ---------------- 绘制 ----------------
+function touchScene() { state.sceneRev = (state.sceneRev | 0) + 1; }
+function hashStr(h, s) { for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; }
+function layerSig(on) {
+  if (!on || typeof on.entries !== 'function') return 0;
+  let h = 2166136261;
+  for (const [k, v] of on) { h = hashStr(h, String(k)); h = (h ^ (v === false ? 2 : 1)) >>> 0; }
+  return h;
+}
+const objIds = new WeakMap(); let objSeq = 1;
+function objId(o) { if (!o || typeof o !== 'object') return 0; let id = objIds.get(o); if (!id) objIds.set(o, id = objSeq++); return id; }
+function sceneKey(d, v) {
+  let cmp = '';
+  if (d.kind === 'compare') {
+    const vis = d.cmpVis, k = d.cmpKinds;
+    cmp = [d.cmpMode, vis.del, vis.add, vis.mod, vis.same, vis.sameHi, k.line, k.text, k.fill, d.cmpMode === 'swipe' ? d.swipe : 0, objId(d.result)].join(',');
+  }
+  return [objId(d), d.spaceIdx, d.rot | 0, d.mir ? 1 : 0, R.bg, v.s, v.cx, v.cy, sCv.width, sCv.height, state.sceneRev | 0, layerSig(d.layerOn), cmp].join('|');
+}
 function redraw() { if (!state.dirty) { state.dirty = true; requestAnimationFrame(draw); } }
 function draw() {
   state.dirty = false;
+  cv = sCv; ctx = sctx;
   sizeCanvas();
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.fillStyle = R.bg === 'white' ? '#ffffff' : '#000000';
-  ctx.fillRect(0, 0, cv.width, cv.height);
-  const d = state.cur; if (!d) return;
-  const v = view(); if (!v) return;
-  const M = matrix(v); const rect = [0, 0, cv.width, cv.height];
-  if (d.kind === 'compare') drawCompare(d, M, rect);
-  else {
-    const sp = curSpace();
-    if (sp.paper) drawPaper(d, sp, M, rect); else { R.drawSpace(ctx, sp, M, rect, { dpr: DPR }); drawXrefs(d, ctx, sp, M, rect, DPR); }
+  const d = state.cur; const v = d && view();
+  if (!d || !v) {
+    sctx.setTransform(1, 0, 0, 1, 0, 0); sctx.fillStyle = R.bg === 'white' ? '#ffffff' : '#000000'; sctx.fillRect(0, 0, sCv.width, sCv.height);
+    octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, oCv.width, oCv.height);
+    painted = null; return;
   }
+  const key = sceneKey(d, v);
+  const M = matrix(v); const rect = [0, 0, sCv.width, sCv.height];
+  if (painted !== key) {
+    ctx = sctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = R.bg === 'white' ? '#ffffff' : '#000000';
+    ctx.fillRect(0, 0, sCv.width, sCv.height);
+    if (d.kind === 'compare') drawCompare(d, M, rect);
+    else {
+      const sp = curSpace();
+      if (sp.paper) drawPaper(d, sp, M, rect); else { R.drawSpace(ctx, sp, M, rect, { dpr: DPR }); drawXrefs(d, ctx, sp, M, rect, DPR); }
+    }
+    painted = key;
+  }
+  ctx = octx;
+  octx.setTransform(1, 0, 0, 1, 0, 0);
+  octx.clearRect(0, 0, oCv.width, oCv.height);
+  if (d.kind === 'compare') drawCompareChrome(d, M);
   drawOverlays(d, M);
+  ctx = sctx;
 }
 function vpMatrix(vp, ms) {
   // 模型 WCS → DCS：减去视图目标点，再按扭转角旋转；DCS → 图纸：减去视图中心，按比例缩放，平移到视口中心
@@ -531,7 +582,7 @@ async function loadXrefs(d) {
     if (got) ok++; else d.xrefDocs.set(k, { doc: null, path: x.path });
   }
   toast(tr('外部参照 {0} 个，已加载 {1} 个', list.length, ok) + (ok < list.length ? tr('。未找到的可在「工具 → 外部参照」里指定文件') : ''), 6000);
-  redraw();
+  touchScene(); redraw();
 }
 function xrefPanel(body, d) {
   const list = d.kind === 'drawing' ? xrefList(d) : [];
@@ -544,7 +595,7 @@ function xrefPanel(body, d) {
       h('div', { style: 'flex:1;min-width:0' }, h('div', { text: x.name + paren(x.n) }), h('div', { style: 'color:' + (ok ? '#2a8a3e' : '#c0392b') + ';font-size:11px;word-break:break-all', text: (ok ? tr('已加载：') + st.path : tr('未找到：') + (x.path || '')) })),
       h('button', { cls: 'btn', text: tr('指定文件'), onclick: async () => {
         const ps = B.openDialog ? await B.openDialog() : null; const p = ps && ps[0]; if (!p) return;
-        try { const got = await openBytes(p.split(/[\\/]/).pop(), await B.readFile(p), p, { hidden: true }); if (got) { (d.xrefDocs = d.xrefDocs || new Map()).set(x.name.toUpperCase(), { doc: got, path: p }); refreshSide(); redraw(); } } catch (e) { toast(String(e.message || e)); }
+        try { const got = await openBytes(p.split(/[\\/]/).pop(), await B.readFile(p), p, { hidden: true }); if (got) { (d.xrefDocs = d.xrefDocs || new Map()).set(x.name.toUpperCase(), { doc: got, path: p }); touchScene(); refreshSide(); redraw(); } } catch (e) { toast(String(e.message || e)); }
       } })));
   }
 }
@@ -582,16 +633,17 @@ function drawCompare(d, M, rect) {
     ctx.fillStyle = 'rgba(29,42,58,.85)'; ctx.fillRect(8 * DPR, 8 * DPR, 120 * DPR, 22 * DPR); ctx.fillRect(W0 - 128 * DPR, 8 * DPR, 120 * DPR, 22 * DPR);
     ctx.fillStyle = '#fff'; ctx.font = `${12 * DPR}px "Microsoft YaHei","Noto Sans CJK SC",sans-serif`; ctx.fillText(tr('◀ 旧图'), 16 * DPR, 23 * DPR); ctx.fillText(tr('新图 ▶'), W0 - 118 * DPR, 23 * DPR);
   } else cmpLayers(d, M, rect, ALL);
-  // 当前差异框（叠加/卷帘模式）
+}
+function drawCompareChrome(d, M, live = true) {
+  const W0 = cv.width, H0 = cv.height;
   const cl = d.result.changes[d.cmpIdx];
   if (cl && d.cmpMode !== 'side') {
     const a = mapply(M, cl.bb[0], cl.bb[1]), b = mapply(M, cl.bb[2], cl.bb[3]);
     const pad = 12 * DPR; const t = (performance.now() / 500) % 1;
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.strokeStyle = '#ff3b8d'; ctx.lineWidth = 2.5 * DPR; ctx.setLineDash([8 * DPR, 5 * DPR]); ctx.lineDashOffset = -t * 13 * DPR;
     ctx.strokeRect(Math.min(a[0], b[0]) - pad, Math.min(a[1], b[1]) - pad, Math.abs(b[0] - a[0]) + pad * 2, Math.abs(b[1] - a[1]) + pad * 2); ctx.restore();
-    setTimeout(redraw, 60);
+    if (live && !chromeTimer) chromeTimer = setTimeout(() => { chromeTimer = 0; redraw(); }, 80);
   }
-  // 所有差异处的淡框（亮显不同之处）
   if (d.cmpVis.boxes) {
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.lineWidth = 1.2 * DPR;
     for (const c of d.result.changes) {
@@ -641,6 +693,7 @@ function measureValue(m, doc = state.cur) {
     case 'boxlen': return withExpand({ main: fmtLen(m.total, doc), num: m.total * doc.unit.uf, kind: 'len', sub: tr('框内 {0} 条线', m.n) + (m.layers ? paren(m.layers) : '') }, m, doc);
     case 'count': return { main: tr('{0} 个', m.n), num: m.n, kind: 'count', sub: m.shape ? tr('与样板相同的图形') : tr('图块「{0}」', m.name) };
     case 'area': {
+      if (m.radius > 0 && !m.offset && !(m.holes && m.holes.length)) { const a = Math.PI * m.radius * m.radius; return { main: fmtArea(a, doc), num: a * doc.unit.uf ** 2, kind: 'area', sub: tr('周长 ') + fmtLen(2 * Math.PI * m.radius, doc) }; }
       if (m.offset) { const q = offsetPoly(p, m.offset / doc.unit.uf); return { main: fmtArea(polyArea(q), doc), num: polyArea(q) * doc.unit.uf ** 2, kind: 'area', sub: tr('原面积 {0}　偏移 {1}{2} mm', fmtArea(polyArea(p), doc), m.offset > 0 ? '+' : '', m.offset), poly: q }; }
       const hole = (m.holes || []).reduce((a, h) => a + polyArea(h), 0);
       return { main: fmtArea(polyArea(p) - hole, doc), num: (polyArea(p) - hole) * doc.unit.uf ** 2, kind: 'area', sub: tr('周长 ') + fmtLen(polyLen(p, true), doc) + (hole ? tr('　已扣孤岛 {0} 个', m.holes.length) : '') };
@@ -997,9 +1050,9 @@ function drawTemp() {
     const a = state.tmp[0]; live(fmtArea(Math.abs(cur[0] - a[0]) * Math.abs(cur[1] - a[1])) + '　' + fmtLen(Math.abs(cur[0] - a[0])) + ' × ' + fmtLen(Math.abs(cur[1] - a[1])));
   } else if (CURVE_TOOLS.has(t) && !(t === 'p2l' && state.tmp.length)) {
     const sp = curSpace();
-    if (t === 'batch') { ctx.setLineDash([]); ctx.lineWidth = 3 * DPR; ctx.strokeStyle = '#00e1ff'; for (const ci of state.batchSel) strokePts(curveGeom(sp, ci).pts.map(q => toScreen(q[0], q[1]))); }
+    if (t === 'batch') { ctx.setLineDash([]); ctx.lineWidth = 3 * DPR; ctx.strokeStyle = '#00e1ff'; for (const ci of state.batchSel) strokeCurveScreen(sp, ci); }
     const hc = state.hoverCurve;
-    if (hc) { const g = curveGeom(sp, hc.ci); ctx.setLineDash([]); ctx.lineWidth = 3 * DPR; ctx.strokeStyle = '#ff3b8d'; if (t === 'p2l') strokePts([hc.a, hc.b].map(q => toScreen(q[0], q[1]))); else strokePts(g.pts.map(q => toScreen(q[0], q[1]))); live(t === 'p2l' ? tr('单击选这条线') : (CK_NAME()[g.kind] || '') + ' ' + fmtLen(g.len) + (t === 'batch' ? tr('　已选 {0} 条', state.batchSel.length) : '')); }
+    if (hc) { ctx.setLineDash([]); ctx.lineWidth = 3 * DPR; ctx.strokeStyle = '#ff3b8d'; if (t === 'p2l') strokePts([hc.a, hc.b].map(q => toScreen(q[0], q[1]))); else strokeCurveScreen(sp, hc.ci); const kind = sp.cinfo[hc.ci * 3 + 2], len = sp.curves[hc.ci * 6]; live(t === 'p2l' ? tr('单击选这条线') : (CK_NAME()[kind] || '') + ' ' + fmtLen(len) + (t === 'batch' ? tr('　已选 {0} 条', state.batchSel.length) : '')); }
     else if (t === 'batch' && state.batchSel.length) live(tr('已选 {0} 条，合计 {1}　右键或回车完成', state.batchSel.length, fmtLen(state.batchSel.reduce((a, ci) => a + sp.curves[ci * 6], 0))));
     else hideTip();
   } else if (t === 'p2l' && state.p2lSeg && cs) {
@@ -1021,7 +1074,12 @@ function drawTemp() {
     else hideTip();
   } else if (t === 'areapick') {
     const g = state.hoverRegion;
-    if (g) { ctx.setLineDash([]); ctx.fillStyle = 'rgba(0,225,255,.18)'; ctx.beginPath(); for (const r of [g.outer, ...g.holes]) { for (let i = 0; i < r.length; i += 2) { const p = toScreen(r[i], r[i + 1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); } ctx.closePath(); } ctx.fill('evenodd'); ctx.stroke(); live(fmtArea(g.area) + (g.holes.length ? tr('（已扣除 {0} 个孤岛）', g.holes.length) : '')); }
+    if (g) {
+      ctx.setLineDash([]); ctx.fillStyle = 'rgba(0,225,255,.18)';
+      if (g.circ) { const o = toScreen(g.circ[0], g.circ[1]); ctx.beginPath(); ctx.arc(o[0], o[1], Math.abs(g.circ[2] * view().s), 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+      else { ctx.beginPath(); for (const r of [g.outer, ...g.holes]) { for (let i = 0; i < r.length; i += 2) { const p = toScreen(r[i], r[i + 1]); i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]); } ctx.closePath(); } ctx.fill('evenodd'); ctx.stroke(); }
+      live(fmtArea(g.area) + (g.holes.length ? tr('（已扣除 {0} 个孤岛）', g.holes.length) : ''));
+    }
     else hideTip();
   } else if (RECT_TOOLS.has(t) && P.length && cs) {
     ctx.strokeRect(P[0][0], P[0][1], cs[0] - P[0][0], cs[1] - P[0][1]);
@@ -1072,11 +1130,51 @@ function findSnap(p) {
   return best;
 }
 function layerVisible(sp, lid) { const n = sp.curveLayers ? sp.curveLayers[lid] : undefined; return n === undefined ? true : R.visible(n); }
-function findCircle(p) {
-  const sp = curSpace(); const c = sp.circles; if (!c) return null;
-  const tol = 8 * DPR / view().s; let best = null, bd = tol;
+function gridOf(sp, key, items, boxOf) {
+  if (sp[key]) return sp[key];
+  const bb = sp.bbox && Number.isFinite(sp.bbox[0]) ? sp.bbox : [0, 0, 1, 1];
+  const size = Math.max(bb[2] - bb[0], bb[3] - bb[1], 1e-9);
+  const cell = size / 128; const g = new Map(); const big = [];
+  for (let i = 0; i < items.length; i++) {
+    const b = boxOf(items[i]);
+    if (!b || !Number.isFinite(b[0])) { big.push(i); continue; }
+    const i0 = Math.floor((b[0] - bb[0]) / cell), i1 = Math.floor((b[2] - bb[0]) / cell);
+    const j0 = Math.floor((b[1] - bb[1]) / cell), j1 = Math.floor((b[3] - bb[1]) / cell);
+    if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4) { big.push(i); continue; }
+    for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const k = x * 100003 + y; let a = g.get(k); if (!a) g.set(k, a = []); a.push(i); }
+  }
+  return (sp[key] = { g, big, cell, bb, items });
+}
+function visitGrid(I, p, fn) {
+  const ix = Math.floor((p[0] - I.bb[0]) / I.cell), iy = Math.floor((p[1] - I.bb[1]) / I.cell);
+  const list = I.g.get(ix * 100003 + iy); if (list) for (const i of list) fn(I.items[i]);
+  for (const i of I.big) fn(I.items[i]);
+}
+function circleIndex(sp) {
+  if (sp._ciIdx) return sp._ciIdx;
+  const c = sp.circles; const bb = sp.bbox && Number.isFinite(sp.bbox[0]) ? sp.bbox : [0, 0, 1, 1];
+  const size = Math.max(bb[2] - bb[0], bb[3] - bb[1], 1e-9); const cell = size / 128; const g = new Map(); const big = [];
   for (let i = 0; i < c.length; i += 4) {
-    if (!layerVisible(sp, c[i + 3])) continue; const d = Math.abs(Math.hypot(p[0] - c[i], p[1] - c[i + 1]) - c[i + 2]); if (d < bd) { bd = d; best = [c[i], c[i + 1], c[i + 2]]; } }
+    if (c[i + 2] > cell * 4) { big.push(i); continue; }
+    const k = Math.floor((c[i] - bb[0]) / cell) * 100003 + Math.floor((c[i + 1] - bb[1]) / cell);
+    let a = g.get(k); if (!a) g.set(k, a = []); a.push(i);
+  }
+  return (sp._ciIdx = { g, big, cell, bb, c });
+}
+function findCircle(p) {
+  const sp = curSpace(); const c = sp && sp.circles; if (!c || !c.length) return null;
+  const I = circleIndex(sp); const tol = 8 * DPR / view().s;
+  const reach = I.cell * 4 + tol;
+  const i0 = Math.floor((p[0] - reach - I.bb[0]) / I.cell), i1 = Math.floor((p[0] + reach - I.bb[0]) / I.cell);
+  const j0 = Math.floor((p[1] - reach - I.bb[1]) / I.cell), j1 = Math.floor((p[1] + reach - I.bb[1]) / I.cell);
+  let best = null, bd = tol;
+  const test = (i) => {
+    if (!layerVisible(sp, c[i + 3])) return;
+    const d = Math.abs(Math.hypot(p[0] - c[i], p[1] - c[i + 1]) - c[i + 2]);
+    if (d < bd) { bd = d; best = [c[i], c[i + 1], c[i + 2]]; }
+  };
+  for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const a = I.g.get(x * 100003 + y); if (a) for (const i of a) test(i); }
+  for (const i of I.big) test(i);
   return best;
 }
 function ringArea(g) { let a = 0; for (let i = 0, j = g.length - 2; i < g.length; j = i, i += 2) a += g[j] * g[i + 1] - g[i] * g[j + 1]; return Math.abs(a) / 2; }
@@ -1085,25 +1183,62 @@ function inRing(g, p) {
   for (let i = 0, j = g.length - 2; i < g.length; j = i, i += 2) if (((g[i + 1] > p[1]) !== (g[j + 1] > p[1])) && p[0] < (g[j] - g[i]) * (p[1] - g[i + 1]) / (g[j + 1] - g[i + 1]) + g[i]) inside = !inside;
   return inside;
 }
-// 返回 { outer, holes, area }：外环是面积最大的环，其余为孤岛
+function regionBox(g) {
+  if (g._bb) return g._bb;
+  if (g.circ) { const [x, y, r] = g.circ; return (g._bb = [x - r, y - r, x + r, y + r]); }
+  const a = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const r of g.rings || []) for (let i = 0; i < r.length; i += 2) { a[0] = Math.min(a[0], r[i]); a[1] = Math.min(a[1], r[i + 1]); a[2] = Math.max(a[2], r[i]); a[3] = Math.max(a[3], r[i + 1]); }
+  return (g._bb = a);
+}
+function regionAreaOf(g) {
+  if (g._area) return g._area;
+  if (g.circ) return (g._area = Math.PI * g.circ[2] * g.circ[2]);
+  const areas = (g.rings || []).map(ringArea);
+  if (!areas.length) return (g._area = 0);
+  const oi = areas.indexOf(Math.max(...areas));
+  g._outer = g.rings[oi]; g._holes = g.rings.filter((_, i) => i !== oi);
+  return (g._area = areas[oi] - areas.reduce((x, y, i) => i === oi ? x : x + y, 0));
+}
 function findRegion(p) {
-  const sp = curSpace(); let best = null, ba = Infinity;
-  for (const g of sp.regions || []) {
-    if (!layerVisible(sp, g.l)) continue;
-    if (!g._bb) { const a = [Infinity, Infinity, -Infinity, -Infinity]; for (const r of g.rings) for (let i = 0; i < r.length; i += 2) { a[0] = Math.min(a[0], r[i]); a[1] = Math.min(a[1], r[i + 1]); a[2] = Math.max(a[2], r[i]); a[3] = Math.max(a[3], r[i + 1]); } g._bb = a; }
-    const b = g._bb; if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue;
-    let inside = false; for (const r of g.rings) if (inRing(r, p)) inside = !inside;
-    if (!inside) continue;
-    if (!g._area) { const areas = g.rings.map(ringArea); const oi = areas.indexOf(Math.max(...areas)); g._outer = g.rings[oi]; g._holes = g.rings.filter((r, i) => i !== oi); g._area = areas[oi] - areas.reduce((x, y, i) => i === oi ? x : x + y, 0); }
-    if (g._area < ba) { ba = g._area; best = g; }
-  }
-  return best ? { outer: best._outer, holes: best._holes, area: best._area } : null;
+  const sp = curSpace(); if (!sp || !sp.regions) return null;
+  const I = gridOf(sp, '_rgIdx', sp.regions, regionBox);
+  let best = null, ba = Infinity;
+  const test = (g) => {
+    if (!g || !layerVisible(sp, g.l)) return;
+    const b = regionBox(g); if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) return;
+    if (g.circ) { if (Math.hypot(p[0] - g.circ[0], p[1] - g.circ[1]) > g.circ[2]) return; }
+    else { let inside = false; for (const r of g.rings || []) if (inRing(r, p)) inside = !inside; if (!inside) return; }
+    const a = regionAreaOf(g); if (a < ba) { ba = a; best = g; }
+  };
+  visitGrid(I, p, test);
+  if (!best) return null;
+  if (best.circ) return { circ: best.circ, outer: null, holes: [], area: regionAreaOf(best) };
+  regionAreaOf(best);
+  return { outer: best._outer, holes: best._holes, area: best._area };
 }
 function boxLength(a, b) {
-  const sp = curSpace(); const c = sp.curves; const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
+  const sp = curSpace(); const c = sp && sp.curves;
+  const x0 = Math.min(a[0], b[0]), x1 = Math.max(a[0], b[0]), y0 = Math.min(a[1], b[1]), y1 = Math.max(a[1], b[1]);
   let total = 0, n = 0; const lays = new Set();
-  if (c) for (let i = 0; i < c.length; i += 6) {
-    if (c[i + 1] >= x0 && c[i + 3] <= x1 && c[i + 2] >= y0 && c[i + 4] <= y1) { const ln = sp.curveLayers[c[i + 5]]; if (!R.visible(ln)) continue; total += c[i]; n++; lays.add(ln); }
+  if (!c) return { total, n, layers: [] };
+  const scan = () => {
+    for (let i = 0; i < c.length; i += 6) {
+      if (c[i + 1] >= x0 && c[i + 3] <= x1 && c[i + 2] >= y0 && c[i + 4] <= y1) { const ln = sp.curveLayers[c[i + 5]]; if (!R.visible(ln)) continue; total += c[i]; n++; lays.add(ln); }
+    }
+  };
+  const I = curveIndex(sp);
+  const i0 = I.cl(Math.floor((x0 - I.bb[0]) / I.cell)), i1 = I.cl(Math.floor((x1 - I.bb[0]) / I.cell));
+  const j0 = I.cl(Math.floor((y0 - I.bb[1]) / I.cell)), j1 = I.cl(Math.floor((y1 - I.bb[1]) / I.cell));
+  if ((i1 - i0 + 1) * (j1 - j0 + 1) > 4000) scan();
+  else {
+    const seen = new Set();
+    const take = (ci) => {
+      if (seen.has(ci)) return; seen.add(ci);
+      const i = ci * 6;
+      if (c[i + 1] >= x0 && c[i + 3] <= x1 && c[i + 2] >= y0 && c[i + 4] <= y1) { const ln = sp.curveLayers[c[i + 5]]; if (!R.visible(ln)) return; total += c[i]; n++; lays.add(ln); }
+    };
+    for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const l = I.g.get(x * 100003 + y); if (l) for (const ci of l) take(ci); }
+    for (const ci of I.big) take(ci);
   }
   return { total, n, layers: [...lays] };
 }
@@ -1111,8 +1246,16 @@ function boxLength(a, b) {
 function countable(n) { return /^\*ANON/.test(n) || (!/^\*/.test(n) && !/^A\$/.test(n)); }
 function blockLabel(n) { return /^\*ANON\d+$/.test(n) ? tr('匿名块 {0}', n.slice(5)) : n; }
 function findInsert(p) {
-  const sp = curSpace(); let best = null, ba = Infinity;
-  for (const it of sp.inserts || []) { if (!layerVisible(sp, it.l)) continue; const b = it.b; if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue; const a = (b[2] - b[0]) * (b[3] - b[1]); if (a < ba && countable(it.n) || (a < ba && !best)) { ba = a; best = it; } }
+  const sp = curSpace(); if (!sp || !sp.inserts || !sp.inserts.length) return null;
+  const I = gridOf(sp, '_inIdx', sp.inserts, it => it.b);
+  let best = null, ba = Infinity;
+  const test = (it) => {
+    if (!it || !countable(it.n) || !layerVisible(sp, it.l)) return;
+    const b = it.b; if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) return;
+    const a = Math.max(0, b[2] - b[0]) * Math.max(0, b[3] - b[1]);
+    if (a < ba) { ba = a; best = it; }
+  };
+  visitGrid(I, p, test);
   return best;
 }
 function textBox(t) {
@@ -1125,8 +1268,17 @@ function textBox(t) {
 }
 function approxW(t) { let w = 0; for (const ch of t.s) w += /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? t.h : t.h * 0.72; return w * t.wf; }
 function findText(p) {
-  const sp = curSpace(); let best = null, ba = Infinity;
-  for (const t of sp.texts) { if (!R.visible(t.layer)) continue; const b = textBox(t); if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) continue; const a = (b[2] - b[0]) * (b[3] - b[1]); if (a < ba) { ba = a; best = { t, box: b }; } }
+  const sp = curSpace(); if (!sp || !sp.texts) return null;
+  const I = gridOf(sp, '_txIdx', sp.texts, (t) => t._qb || (t._qb = textBox(t)));
+  let best = null, ba = Infinity;
+  const test = (t) => {
+    if (!t || !R.visible(t.layer)) return;
+    const b = t._qb || textBox(t);
+    if (p[0] < b[0] || p[0] > b[2] || p[1] < b[1] || p[1] > b[3]) return;
+    const a = (b[2] - b[0]) * (b[3] - b[1]);
+    if (a < ba) { ba = a; best = { t, box: b }; }
+  };
+  visitGrid(I, p, test);
   return best;
 }
 function pickItem(px, py) {
@@ -1164,7 +1316,7 @@ function curveIndex(sp) {
   const c = sp.curves, bb = sp.view || sp.bbox; const N = 256; const size = Math.max(bb[2] - bb[0], bb[3] - bb[1], 1e-9); const cell = size / N; const g = new Map(); const big = [];
   const cl = (v) => Math.max(0, Math.min(N - 1, v));
   for (let i = 0, ci = 0; i < c.length; i += 6, ci++) {
-    if (!sp.cinfo || !sp.cinfo[ci * 3 + 1]) continue;
+    if (!sp.cinfo || !sp.cinfo[ci * 3 + 1]) { big.push(ci); continue; }
     const i0 = cl(Math.floor((c[i + 1] - bb[0]) / cell)), i1 = cl(Math.floor((c[i + 3] - bb[0]) / cell)), j0 = cl(Math.floor((c[i + 2] - bb[1]) / cell)), j1 = cl(Math.floor((c[i + 4] - bb[1]) / cell));
     if ((i1 - i0 + 1) * (j1 - j0 + 1) > 64) { big.push(ci); continue; }
     for (let x = i0; x <= i1; x++) for (let y = j0; y <= j1; y++) { const k = x * 100003 + y; let l = g.get(k); if (!l) g.set(k, l = []); l.push(ci); }
@@ -1191,6 +1343,18 @@ function curveGeom(sp, ci) {
   const s0 = sp.cinfo[ci * 3], n = sp.cinfo[ci * 3 + 1]; const pts = [], vf = [];
   for (let k = 0; k < n; k++) { pts.push([sp.cpts[(s0 + k) * 2], sp.cpts[(s0 + k) * 2 + 1]]); vf.push(sp.cvf[s0 + k]); }
   return { pts, vf, len: sp.curves[ci * 6], kind: sp.cinfo[ci * 3 + 2], layer: sp.curveLayers[sp.curves[ci * 6 + 5]] };
+}
+function strokeCurveScreen(sp, ci, maxPts = 800) {
+  if (!sp || !sp.cinfo) return;
+  const s0 = sp.cinfo[ci * 3], n = sp.cinfo[ci * 3 + 1]; if (!n) return;
+  const step = Math.max(1, Math.ceil((n - 1) / maxPts));
+  ctx.beginPath();
+  for (let k = 0, first = true; k < n; k += step) {
+    const p = toScreen(sp.cpts[(s0 + k) * 2], sp.cpts[(s0 + k) * 2 + 1]);
+    if (first) { ctx.moveTo(p[0], p[1]); first = false; } else ctx.lineTo(p[0], p[1]);
+  }
+  if ((n - 1) % step) { const p = toScreen(sp.cpts[(s0 + n - 1) * 2], sp.cpts[(s0 + n - 1) * 2 + 1]); ctx.lineTo(p[0], p[1]); }
+  ctx.stroke();
 }
 // 显示用的折线点数不超过 n
 function thin(pts, n = 3000) { if (pts.length <= n) return pts; const st = pts.length / n; const out = []; for (let i = 0; i < n; i++) out.push(pts[Math.floor(i * st)]); out.push(pts[pts.length - 1]); return out; }
@@ -1288,6 +1452,8 @@ cv.addEventListener('pointermove', (e) => {
     }
     return;
   }
+  const prevSnap = state.snapPt && (state.snapPt[0] + ',' + state.snapPt[1]);
+  const prev = [state.hover && state.hover.item, state.hoverCurve, state.hoverCircle, state.hoverRegion, state.hoverInsert, state.hoverText];
   const p = cursorPoint(px, py); state.cursorLocal = p;
   const w = W(p);
   $('#st-coord').textContent = `X: ${w[0].toFixed(3)}   Y: ${w[1].toFixed(3)}`;
@@ -1299,7 +1465,10 @@ cv.addEventListener('pointermove', (e) => {
   if (state.tool === 'count') state.hoverInsert = findInsert(toLocal(px, py));
   if (state.tool === 'edittext') state.hoverText = findText(toLocal(px, py));
   if (!['dist', 'lin', 'poly', 'side', 'area', 'rectarea', 'angle', 'radius', 'circle', 'areapick', 'coord', 'calib', 'boxlen', 'count', 'edittext', 'p2l', ...CURVE_TOOLS].includes(state.tool)) hideTip();
-  redraw();
+  const next = [state.hover && state.hover.item, state.hoverCurve, state.hoverCircle, state.hoverRegion, state.hoverInsert, state.hoverText];
+  let hoverChanged = (state.snapPt && (state.snapPt[0] + ',' + state.snapPt[1])) !== prevSnap;
+  if (!hoverChanged) for (let i = 0; i < prev.length; i++) if (prev[i] !== next[i]) { hoverChanged = true; break; }
+  if (state.tool || state.drag || hoverChanged) redraw();
 });
 cv.addEventListener('pointerup', (e) => {
   const dr = state.drag; state.drag = null;
@@ -1418,6 +1587,12 @@ async function toolClick(p, screen) {
     case 'areapick': {
       const g = findRegion(toLocal(...screen));
       if (!g) { toast(tr('这里没有找到封闭图形或填充')); break; }
+      if (g.circ) {
+        const [x, y, r] = g.circ; const pts = [];
+        for (let k = 0; k < 48; k++) pts.push(W([x + r * Math.cos(k * Math.PI / 24), y + r * Math.sin(k * Math.PI / 24)]));
+        addItem('m', { type: 'area', pts, holes: [], cat: d.cat, picked: true, radius: r, ts: tsNow(), lo: loNow() });
+        break;
+      }
       const toPts = (r) => { const a = []; for (let i = 0; i < r.length; i += 2) a.push(W([r[i], r[i + 1]])); return a; };
       addItem('m', { type: 'area', pts: toPts(g.outer), holes: g.holes.map(toPts), cat: d.cat, picked: true, ts: tsNow(), lo: loNow() });
       break;
@@ -1581,19 +1756,26 @@ function findShapes(a, b) {
   let tb = [Infinity, Infinity, -Infinity, -Infinity]; for (const ci of tpl) { tb[0] = Math.min(tb[0], c[ci * 6 + 1]); tb[1] = Math.min(tb[1], c[ci * 6 + 2]); tb[2] = Math.max(tb[2], c[ci * 6 + 3]); tb[3] = Math.max(tb[3], c[ci * 6 + 4]); }
   const size = Math.max(tb[2] - tb[0], tb[3] - tb[1], 1e-9); const q = size * 0.004;
   const anchor = tpl.reduce((m, ci) => (c[ci * 6] > c[m * 6] ? ci : m), tpl[0]);
-  const AL = c[anchor * 6], AK = kindOf(anchor), AC = cen(anchor);
+  const AL = c[anchor * 6], AK = kindOf(anchor), AC = cen(anchor), T = Math.max(q, AL * 0.002);
   const same = (ci, cj) => kindOf(ci) === kindOf(cj) && Math.abs(c[ci * 6] - c[cj * 6]) <= Math.max(q, c[cj * 6] * 0.002) && Math.abs((c[ci * 6 + 3] - c[ci * 6 + 1]) - (c[cj * 6 + 3] - c[cj * 6 + 1])) <= q && Math.abs((c[ci * 6 + 4] - c[ci * 6 + 2]) - (c[cj * 6 + 4] - c[cj * 6 + 2])) <= q;
-  // 曲线中心的网格索引
+  const sig = (ci) => { const i = ci * 6; return kindOf(ci) + ':' + Math.round(c[i] / T) + ':' + Math.round((c[i + 3] - c[i + 1]) / q) + ':' + Math.round((c[i + 4] - c[i + 2]) / q); };
+  const buckets = new Map();
+  for (let i = 0, ci = 0; i < c.length; i += 6, ci++) { if (!layerVisible(sp, c[i + 5])) continue; const s = sig(ci); let a = buckets.get(s); if (!a) buckets.set(s, a = []); a.push(ci); }
+  const seeds = []; const seenSeed = new Set();
+  for (const dl of [-1, 0, 1]) for (const dw of [-1, 0, 1]) for (const dh of [-1, 0, 1]) {
+    const i = anchor * 6; const s = AK + ':' + Math.round(c[i] / T + dl) + ':' + Math.round((c[i + 3] - c[i + 1]) / q + dw) + ':' + Math.round((c[i + 4] - c[i + 2]) / q + dh);
+    const list = buckets.get(s); if (!list) continue; for (const ci of list) if (!seenSeed.has(ci)) { seenSeed.add(ci); seeds.push(ci); }
+  }
   const g = new Map(); const key = (x, y) => Math.round(x / q) * 1000003 + Math.round(y / q);
   for (let i = 0, ci = 0; i < c.length; i += 6, ci++) { if (!layerVisible(sp, c[i + 5])) continue; const p = cen(ci); const k = key(p[0], p[1]); let l = g.get(k); if (!l) g.set(k, l = []); l.push(ci); }
-  const C = []; for (let ci = 0; ci < c.length / 6; ci++) C.push(cen(ci));
-  const hasMatch = (x, y, tj) => { const gx = Math.round(x / q), gy = Math.round(y / q); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = g.get((gx + i) * 1000003 + gy + j); if (l) for (const ck of l) if (same(ck, tj) && Math.hypot(C[ck][0] - x, C[ck][1] - y) <= q * 1.5) return true; } return false; };
+  const hasMatch = (x, y, tj) => { const gx = Math.round(x / q), gy = Math.round(y / q); for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) { const l = g.get((gx + i) * 1000003 + gy + j); if (l) for (const ck of l) { const pk = cen(ck); if (same(ck, tj) && Math.hypot(pk[0] - x, pk[1] - y) <= q * 1.5) return true; } } return false; };
   const hits = []; const hitKeys = new Set();
-  for (let i = 0, ci = 0; i < c.length; i += 6, ci++) {
+  for (const ci of seeds) {
+    const i = ci * 6;
     if (kindOf(ci) !== AK || Math.abs(c[i] - AL) > Math.max(q, AL * 0.002) || !same(ci, anchor) || !layerVisible(sp, c[i + 5])) continue;
     const p = cen(ci); const dx = p[0] - AC[0], dy = p[1] - AC[1];
     let ok = true;
-    for (const tj of tpl) { if (tj === anchor) continue; const tc = C[tj]; if (!hasMatch(tc[0] + dx, tc[1] + dy, tj)) { ok = false; break; } }
+    for (const tj of tpl) { if (tj === anchor) continue; const tc = cen(tj); if (!hasMatch(tc[0] + dx, tc[1] + dy, tj)) { ok = false; break; } }
     const hk = Math.round(dx / q) + ',' + Math.round(dy / q);
     if (ok && !hitKeys.has(hk)) { hitKeys.add(hk); hits.push([dx, dy]); }
     if (hits.length > 20000) break;
@@ -2116,7 +2298,9 @@ function renderImage(d, mode, maxSide) {
   else if (mode === 'current') bb = corners();
   else { bb = sp.view || sp.bbox; if (sp.paper && sp.viewports.length) { const save = d.views[d.spaceIdx]; zoomExtents(true); bb = corners(); d.views[d.spaceIdx] = save; } }
   const w = bb[2] - bb[0], hgt = bb[3] - bb[1];
-  const k = maxSide / Math.max(w, hgt);
+  let k = maxSide / Math.max(w, hgt);
+  const MAX_PX = 16000000; const area = Math.max(w * hgt, 1e-12);
+  if (area * k * k > MAX_PX) k = Math.sqrt(MAX_PX / area);
   const W0 = Math.max(1, Math.round(w * k)), H0 = Math.max(1, Math.round(hgt * k));
   const off = document.createElement('canvas'); off.width = W0; off.height = H0;
   const c2 = off.getContext('2d');
@@ -2126,7 +2310,7 @@ function renderImage(d, mode, maxSide) {
   c2.fillStyle = R.bg === 'white' ? '#fff' : '#000'; c2.fillRect(0, 0, W0, H0);
   const dprE = Math.max(1, maxSide / 2400);
   if (d.kind === 'compare') {
-    withTarget(c2, off, dprE, vv, () => drawCompare(d, M, [0, 0, W0, H0]));
+    withTarget(c2, off, dprE, vv, () => { drawCompare(d, M, [0, 0, W0, H0]); drawCompareChrome(d, M, false); });
   } else if (sp.paper) {
     withTarget(c2, off, dprE, vv, () => drawPaper(d, sp, M, [0, 0, W0, H0]));
   } else { R.drawSpace(c2, sp, M, [0, 0, W0, H0], { dpr: dprE }); drawXrefs(d, c2, sp, M, [0, 0, W0, H0], dprE); }

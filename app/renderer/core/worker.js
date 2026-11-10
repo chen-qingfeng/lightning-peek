@@ -119,9 +119,16 @@ async function open(id, name, bytes) {
   const t1 = performance.now();
   const scene = buildScene(doc);
   const t2 = performance.now();
-  docs.set(id, { doc, text, enc });
+  docs.set(id, { bytes: dxfBytes.slice(), enc, warn });
   scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn };
   return scene;
+}
+function textOf(D) { return decodeDxf(D.bytes).text; }
+function docOf(id) {
+  const D = docs.get(id);
+  if (!D) return null;
+  if (!D.doc) D.doc = parseDxf(textOf(D));
+  return D.doc;
 }
 function verName(v) {
   const m = { AC1009: 'R12', AC1012: 'R13', AC1014: 'R14', AC1015: '2000', AC1018: '2004', AC1021: '2007', AC1024: '2010', AC1027: '2013', AC1032: '2018' };
@@ -147,7 +154,7 @@ function autoAlign(A, B) {
   return best;
 }
 function compare(aId, bId, opts = {}) {
-  const A = docs.get(aId)?.doc, B = docs.get(bId)?.doc;
+  const A = docOf(aId), B = docOf(bId);
   if (!A || !B) throw new Error('对比的图纸已关闭');
   const pre = buildScene(B, { sinkFactory: () => new SigSink(1) });
   const mb = pre.spaces[0];
@@ -292,10 +299,10 @@ self.onmessage = async (e) => {
     } else if (cmd === 'compare') {
       const r = compare(e.data.a, e.data.b, e.data.opts || {});
       post({ id, ok: true, result: r });
-    } else if (cmd === 'close') { docs.delete(e.data.doc); }
+    } else if (cmd === 'close') { docs.delete(e.data.doc); post({ id, ok: true }); }
     else if (cmd === 'dxf') {
       const D = docs.get(e.data.doc); if (!D) throw new Error('图纸已关闭');
-      let txt = applyEdits(D.text, e.data.edits || {});
+      let txt = applyEdits(textOf(D), e.data.edits || {});
       if (e.data.bbox) txt = filterRegion(txt, e.data.bbox);
       const dropped = (txt.match(/\r\n\s*0\r\nACAD_PROXY_ENTITY\r\n/g) || []).length + (D.warn & 64 ? 1 : 0) * 0;
       const out = D.enc && D.enc !== 'utf-8' ? encodeLegacy(txt, D.enc).slice() : new TextEncoder().encode(txt);

@@ -28,9 +28,20 @@ test('block instances are counted per name', () => {
 test('closed polyline regions give exact rectangle areas', () => {
   const ms = load('pump-room.dxf').spaces[0];
   const area = (r) => { let a = 0; for (let i = 0, j = r.length - 2; i < r.length; j = i, i += 2) a += r[j] * r[i + 1] - r[i] * r[j + 1]; return Math.abs(a) / 2; };
-  const areas = ms.regions.map((g) => area(g.rings[0]));
+  const areas = ms.regions.filter((g) => g.rings[0] && g.rings[0].length).map((g) => area(g.rings[0]));
   // 内墙净尺寸 11760 × 7760 mm
   assert.ok(areas.some((a) => Math.abs(a - 11760 * 7760) < 1e-6));
+});
+
+test('circles are stored analytically for area pick', () => {
+  const dxf = ['0', 'SECTION', '2', 'ENTITIES', '0', 'CIRCLE', '8', '0', '10', '0', '20', '0', '40', '10', '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const ms = buildScene(parseDxf(dxf)).spaces[0];
+  assert.equal(ms.regions.length, 1);
+  assert.ok(ms.regions[0].circ);
+  const [x, y, r] = ms.regions[0].circ;
+  assert.equal(r, 10);
+  assert.ok(Math.abs(x) < 1e-9 && Math.abs(y) < 1e-9);
+  assert.equal(ms.regions[0].rings.length, 0);
 });
 
 test('circle length is analytic', () => {

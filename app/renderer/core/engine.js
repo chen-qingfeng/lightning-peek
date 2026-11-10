@@ -539,7 +539,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       for (let k = 0; k < 4; k++) { const q = ap(M, r.f(10) + r.f(40) * Math.cos(k * Math.PI / 2), r.f(20) + r.f(40) * Math.sin(k * Math.PI / 2)); S.snap(q[0], q[1], 4); }
       S.circle(c[0], c[1], rr, 0, Math.PI * 2, true);
       S.curve(s.layer, 2 * Math.PI * rr, arcPoints(r.f(10), r.f(20), r.f(40), 0, Math.PI * 2, 36).map(q => ap(M, q[0], q[1])), null, 'circle');
-      { const ring = []; for (let k = 0; k < 720; k++) ring.push(ap(M, r.f(10) + r.f(40) * Math.cos(k * Math.PI / 360), r.f(20) + r.f(40) * Math.sin(k * Math.PI / 360))); S.region(ring); }
+      S.circleRegion(c[0], c[1], rr);
       return 0;
     }
     case 'ARC': {
@@ -1161,31 +1161,39 @@ export class SceneSink {
     if (this.samplesX.length < 200000) { this.samplesX.push(x); this.samplesY.push(y); }
   }
   key(s, dash, w) { return s.layer + '\u0000' + s.color + '\u0000' + (dash ? dash.map(x => x.toPrecision(4)).join(',') : '') + '\u0000' + (w > 0 ? w.toPrecision(4) : w < 0 ? 'pt' : ''); }
+  _box(bb, x, y) { if (x < bb[0]) bb[0] = x; if (y < bb[1]) bb[1] = y; if (x > bb[2]) bb[2] = x; if (y > bb[3]) bb[3] = y; }
   path(s, ops, dash, w = 0, type, noBB) {
     const k = this.key(s, dash, w);
     let b = this.batches.get(k);
-    if (!b) { b = { layer: s.layer, color: s.color, dash, w, ops: [] }; this.batches.set(k, b); }
+    if (!b) { b = { layer: s.layer, color: s.color, dash, w, ops: [], bb: [Infinity, Infinity, -Infinity, -Infinity] }; this.batches.set(k, b); }
     const o = b.ops; for (let j = 0; j < ops.length; j++) o.push(ops[j]);
-    if (!noBB) for (let j = 0; j < ops.length;) {
+    if (noBB) { b.nocull = true; return; }
+    for (let j = 0; j < ops.length;) {
       const op = ops[j];
-      if (op === OP.M || op === OP.L) { this._bb(ops[j + 1], ops[j + 2]); j += 3; }
-      else if (op === OP.A) { this._bb(ops[j + 1] - ops[j + 3], ops[j + 2] - ops[j + 3]); this._bb(ops[j + 1] + ops[j + 3], ops[j + 2] + ops[j + 3]); j += 7; }
-      else if (op === OP.E) j += 9; else j++;
+      if (op === OP.M || op === OP.L) { this._bb(ops[j + 1], ops[j + 2]); this._box(b.bb, ops[j + 1], ops[j + 2]); j += 3; }
+      else if (op === OP.A) { this._bb(ops[j + 1] - ops[j + 3], ops[j + 2] - ops[j + 3]); this._bb(ops[j + 1] + ops[j + 3], ops[j + 2] + ops[j + 3]); this._box(b.bb, ops[j + 1] - ops[j + 3], ops[j + 2] - ops[j + 3]); this._box(b.bb, ops[j + 1] + ops[j + 3], ops[j + 2] + ops[j + 3]); j += 7; }
+      else if (op === OP.E) {
+        const rad = Math.hypot(ops[j + 3], ops[j + 4]);
+        this._bb(ops[j + 1] - rad, ops[j + 2] - rad); this._bb(ops[j + 1] + rad, ops[j + 2] + rad);
+        this._box(b.bb, ops[j + 1] - rad, ops[j + 2] - rad); this._box(b.bb, ops[j + 1] + rad, ops[j + 2] + rad);
+        j += 9;
+      } else j++;
     }
   }
   fill(s, rings, type, alpha = 1) {
     const k = s.layer + '\u0000' + s.color + '\u0000' + alpha;
     let b = this.fills.get(k);
-    if (!b) { b = { layer: s.layer, color: s.color, alpha, rings: [], groups: [] }; this.fills.set(k, b); }
+    if (!b) { b = { layer: s.layer, color: s.color, alpha, rings: [], groups: [], bb: [Infinity, Infinity, -Infinity, -Infinity] }; this.fills.set(k, b); }
     const g0 = b.rings.length;
-    for (const rg of rings) { const a = []; for (const p of rg) { a.push(p[0], p[1]); this._bb(p[0], p[1]); } b.rings.push(a); }
+    for (const rg of rings) { const a = []; for (const p of rg) { a.push(p[0], p[1]); this._bb(p[0], p[1]); this._box(b.bb, p[0], p[1]); } b.rings.push(a); }
     b.groups.push(g0, b.rings.length);
   }
   patSeg(s, a, b) {
     const k = this.key(s, null, 0) + '\u0000pat';
     let bt = this.batches.get(k);
-    if (!bt) { bt = { layer: s.layer, color: s.color, dash: null, w: 0, ops: [], pat: true }; this.batches.set(k, bt); }
+    if (!bt) { bt = { layer: s.layer, color: s.color, dash: null, w: 0, ops: [], pat: true, bb: [Infinity, Infinity, -Infinity, -Infinity] }; this.batches.set(k, bt); }
     bt.ops.push(OP.M, a[0], a[1], OP.L, b[0], b[1]);
+    this._box(bt.bb, a[0], a[1]); this._box(bt.bb, b[0], b[1]);
   }
   text(s, it) {
     this.texts.push(it);
@@ -1196,14 +1204,15 @@ export class SceneSink {
   circle(cx, cy, r, a0, a1, full) { this.circles.push(cx, cy, r, this.cur || 0); }
   seg(x0, y0, x1, y1) { if (this.segs.length < 4e6) this.segs.push(x0, y0, x1, y1); }
   region(flat) { if (this.regions.length < 40000) { const a = []; for (const p of flat) a.push(p[0], p[1]); this.regions.push({ rings: [a], l: this.cur || 0 }); } }
+  circleRegion(cx, cy, r) { if (r > 0 && this.regions.length < 40000) this.regions.push({ circ: [cx, cy, r], rings: [], l: this.cur || 0 }); }
   hatchRegion(rings) { if (this.regions.length < 40000 && rings.length) this.regions.push({ rings: rings.map(rg => { const a = []; for (const p of rg) a.push(p[0], p[1]); return a; }), l: this.cur || 0, hatch: 1 }); }
   finish() {
     const batches = [...this.batches.values()].map(b => ({ ...b, ops: Float64Array.from(b.ops) }));
-    const fills = [...this.fills.values()].map(b => ({ layer: b.layer, color: b.color, alpha: b.alpha, groups: b.groups, rings: b.rings.map(r => Float64Array.from(r)) }));
+    const fills = [...this.fills.values()].map(b => ({ layer: b.layer, color: b.color, alpha: b.alpha, groups: b.groups, bb: b.bb, rings: b.rings.map(r => Float64Array.from(r)) }));
     return {
       batches, fills, texts: this.texts,
       snaps: Float64Array.from(this.snaps), circles: Float64Array.from(this.circles), segs: Float64Array.from(this.segs),
-      regions: this.regions.map(g => ({ rings: g.rings.map(r => Float64Array.from(r)), l: g.l, hatch: g.hatch || 0 })),
+      regions: this.regions.map(g => ({ rings: (g.rings || []).map(r => Float64Array.from(r)), l: g.l, hatch: g.hatch || 0, circ: g.circ || null })),
       curves: Float64Array.from(this.curves), cpts: this.cpts.slice(0, this.np * 2), cvf: this.cvf.slice(0, this.np), cinfo: Uint32Array.from(this.cinfo), curveLayers: [...this.layerIds.keys()], inserts: this.inserts,
       bbox: this.bb, view: smartExtents(this.bb, this.samplesX, this.samplesY),
     };
