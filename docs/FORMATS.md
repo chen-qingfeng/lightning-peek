@@ -30,6 +30,7 @@
 | REGION, 3DSOLID, BODY, MESH | No | |
 | MLEADER | No | |
 | Proxy / custom objects (e.g. TArch) | No | Export to plain entities ("T3") first |
+| TArch annotations (text, multi-line text, elevations, axis labels, drawing names, door/window numbers, leaders, index symbols, arrow notes, tables, dimensions) | Yes (DWG 2000–2004) | Read from the object data; not written to exported DXF/DWG yet. Walls, columns, stairs, slabs: no |
 | External references | Yes | Loaded from the recorded path or the drawing's folder; view only, no snapping |
 
 ## Tested drawings (0.1.4)
@@ -75,6 +76,7 @@ Opening the 380 KB DWG above took about 1 second in headless Chromium inside a L
 | 面域、三维实体 | 否 | |
 | 多重引线 | 否 | |
 | 代理/自定义对象（如天正） | 否 | 请先导出为普通图元（T3） |
+| 天正标注类对象（单行/多行文字、标高、轴号、图名、门窗编号、引出标注、索引符号、箭头引注、表格、尺寸） | 是（DWG 2000–2004） | 从对象数据里读出；暂不写入导出的 DXF/DWG。墙、柱、楼梯、楼板：否 |
 | 外部参照 | 是 | 按记录的路径或与图纸同目录查找；只显示，不能捕捉 |
 
 ### 测试过的图纸（0.1.4）

@@ -40,7 +40,7 @@ export function decodeDxf(bytes) {
 }
 const CP_MAP = { ANSI_936: 'gbk', ANSI_950: 'big5', ANSI_932: 'shift_jis', ANSI_949: 'euc-kr', ANSI_1252: 'windows-1252', ANSI_1251: 'windows-1251', ANSI_1250: 'windows-1250' };
 // 图纸的 ANSI 代码页（OLE 预览里的文字按它解码）
-function ansiOf(doc) {
+export function ansiOf(doc) {
   const v = doc.header.$DWGCODEPAGE; const cp = v && v[0] ? String(v[0][1]).toUpperCase() : '';
   return CP_MAP[cp] || 'gbk';
 }
@@ -61,7 +61,34 @@ function decodeDxfInner(bytes) {
   const m = head.match(/\$DWGCODEPAGE\s*\r?\n\s*3\s*\r?\n([^\r\n]+)/);
   const cp = (m ? m[1].trim() : 'ANSI_936').toUpperCase();
   const enc = CP_MAP[cp] || 'gbk';
-  return { text: new TextDecoder(enc).decode(bytes), enc };
+  return { text: new TextDecoder(enc).decode(rejoinSplitChars(bytes, enc)), enc };
+}
+// LibreDWG 把长 MTEXT 按 250 字节切成多段（组码 3…3,1），会把一个双字节汉字劈成两半，
+// 后面整段解码错位（例如“加盖出图章”变成“加�浅鐾…”）。把段尾落单的前导字节挪到下一段开头。
+const LEAD = {
+  gbk: b => b >= 0x81 && b <= 0xfe, big5: b => b >= 0x81 && b <= 0xfe, 'euc-kr': b => b >= 0x81 && b <= 0xfe,
+  shift_jis: b => (b >= 0x81 && b <= 0x9f) || (b >= 0xe0 && b <= 0xfc),
+};
+export function rejoinSplitChars(bytes, enc) {
+  const isLead = LEAD[enc]; if (!isLead) return bytes;
+  const s = new TextDecoder('latin1').decode(bytes);
+  if (!/(^|\n)\s*3\r?\n/.test(s)) return bytes;
+  const L = s.split('\n');
+  let changed = false;
+  for (let i = 0; i + 3 < L.length; i++) {
+    if (L[i].trim() !== '3') continue;
+    const v = L[i + 1].replace(/\r$/, ''), cr = L[i + 1].endsWith('\r') ? '\r' : '';
+    const nc = L[i + 2].trim(); if (nc !== '3' && nc !== '1') continue;
+    let k = 0; while (k < v.length) { const b = v.charCodeAt(k); k += isLead(b) ? 2 : 1; }
+    if (k === v.length + 1) { // 最后一个字节是落单的前导字节
+      L[i + 1] = v.slice(0, -1) + cr; L[i + 3] = v.slice(-1) + L[i + 3]; changed = true;
+    }
+    i++;
+  }
+  if (!changed) return bytes;
+  const out = L.join('\n'); const u = new Uint8Array(out.length);
+  for (let j = 0; j < out.length; j++) u[j] = out.charCodeAt(j);
+  return u;
 }
 // 把文本按旧代码页编码回字节（R2007 以前的 DXF 另存时用）
 const ENC_MAPS = new Map();
@@ -129,7 +156,7 @@ export function makeRec(type, pairs, extra) {
 
 export function parseDxf(text) {
   const { codes, vals, n } = tokenize(text);
-  const doc = { header: {}, layers: new Map(), ltypes: new Map(), styles: new Map(), blocks: new Map(), blockRecords: new Map(), layerHandles: new Map(), entities: [], layouts: [] };
+  const doc = { header: {}, layers: new Map(), ltypes: new Map(), styles: new Map(), styleHandles: new Map(), blocks: new Map(), blockRecords: new Map(), layerHandles: new Map(), entities: [], layouts: [] };
   let p = 0;
   const readRec = () => {
     const type = vals[p].trim(); p++;
@@ -162,6 +189,7 @@ export function parseDxf(text) {
             doc.ltypes.set(r.s(2).toUpperCase(), { name: r.s(2), dashes: r.all(49).map(Number).filter(Number.isFinite), total: r.f(40) });
           } else if (r.type === 'STYLE') {
             doc.styles.set(r.s(2).toUpperCase(), { name: r.s(2), font: r.s(3), big: r.s(4), wf: r.f(41, 1) || 1, obl: r.f(50), h: r.f(40) });
+            if (r.has(5)) doc.styleHandles.set(r.s(5).toUpperCase(), r.s(2));
           } else if (r.type === 'BLOCK_RECORD') {
             doc.blockRecords.set(r.s(5).toUpperCase(), r.s(2));
           }

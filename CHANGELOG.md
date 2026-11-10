@@ -2,6 +2,22 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.1.8] – Preview – 2026-11-10
+
+### Fixed
+- TArch annotation objects now show (AutoCAD 2000–2004 DWG). LibreDWG does not know these classes and dropped them, and many TArch files (for example `_t7` exports) store empty proxy graphics, so exploding did not help either. They are now read from the object data and drawn as ordinary text and lines:
+  - single-line and multi-line text (`TCH_TEXT`, `TCH_MTEXT`), with alignment, box width and line spacing;
+  - elevations (`TCH_ELEVATION`), including mirrored and flipped symbols, and `±0.000`;
+  - axis labels (`TCH_AXIS_LABEL`), drawing names (`TCH_DRAWINGNAME`), door/window numbers (`TCH_OPENING`);
+  - leaders (`TCH_MULTILEADER`), index symbols (`TCH_INDEXPOINTER`), arrow notes (`TCH_ARROW`);
+  - tables (`TCH_SHEET`) with merged cells;
+  - dimension chains (`TCH_DIMENSION2`).
+  TArch markup `^U2^U`, `^U3^U` and `^C1^C` shows as ², ³ and ①. Walls, columns, stairs, handrails and slabs are still not shown.
+- Long Chinese MTEXT in pre-2007 DWG no longer turns into garbage halfway through. LibreDWG splits MTEXT into 250-byte pieces and could cut a double-byte character in two.
+
+### Changed
+- TArch objects that still cannot be shown (walls, columns, stairs…) are listed by name in the "not shown" note when a drawing opens, instead of disappearing silently.
+
 ## [0.1.7] – Preview – 2026-11-10
 
 ### Added

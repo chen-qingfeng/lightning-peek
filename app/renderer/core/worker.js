@@ -1,5 +1,6 @@
 // 闪电看图 · 后台解析线程
-import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec } from './engine.js';
+import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
+import { extractTch, tchBuild, tchMarkup, TCH_CLASSES } from './tarch.js';
 
 let wasm = null;
 async function lib() {
@@ -17,14 +18,17 @@ function dwgToDxf(m, bytes) {
   try {
     const r = m.dwg_read_file(inF);
     const err = r && typeof r.error === 'number' ? r.error : 0;
-    let oles = [];
+    let oles = [], tch = null;
     if (r && r.data && err < 128) { try { oles = extractOles(m, r.data); } catch (e) { console.warn('OLE', e); } }
+    // 天正文字的位流格式只在 2000/2004 图纸上核实过；2007 起字符串另存在字符串流里，不按这个格式读
+    const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
+    if (r && r.data && err < 128) { try { tch = extractTch(m, r.data, hex, ver === 'AC1015' || ver === 'AC1018'); } catch (e) { console.warn('TArch', e); } }
     if (r && r.data && m.dwg_free) { try { m.dwg_free(r.data); } catch (e) { /* ignore */ } }
     if (err >= 128) throw new Error(errText(err));
     const rc = m.dwg_write_dxf(inF, outF);
     if (rc >= 128 || !m.FS.analyzePath(outF).exists) throw new Error(errText(rc || err));
     const out = m.FS.readFile(outF);
-    return { bytes: out, warn: err, oles };
+    return { bytes: out, warn: err, oles, tch };
   } finally {
     try { m.FS.unlink(inF); } catch (e) { /* ignore */ }
     try { m.FS.unlink(outF); } catch (e) { /* ignore */ }
@@ -52,31 +56,66 @@ function extractOles(m, dwg) {
   }
   return out;
 }
-// 把取出的 OLE 对象作为记录放回解析后的图纸：模型空间 / 图纸空间 / 所在的块
+// 把 DXF 输出里丢失的对象作为记录放回解析后的图纸：模型空间 / 图纸空间 / 所在的块
+function placer(doc) {
+  const byHandle = new Map(); for (const [h, nm] of doc.blockRecords) byHandle.set(h, nm);
+  // 哪些空间的图元写在 ENTITIES 段（当前布局和模型），其余布局的图元在 BLOCKS 段里
+  const inEntities = new Set(); for (const r of doc.entities) { const h = r.s(330).toUpperCase(); if (h) inEntities.add(h); }
+  return (type, pairs, mode, owner, extra) => {
+    const bn = mode === 0 ? (byHandle.get(owner) || '') : '';
+    if (mode === 1) { doc.entities.push(makeRec(type, [...pairs, [67, 1]], extra)); return; }
+    if (!bn || mode === 2) { doc.entities.push(makeRec(type, pairs, extra)); return; }
+    const b = doc.blocks.get(bn.toUpperCase());
+    const isSpace = /^\*(MODEL|PAPER)_SPACE/i.test(bn);
+    if (isSpace && inEntities.has(owner)) { doc.entities.push(makeRec(type, [...pairs, [330, owner]], extra)); return; }
+    if (b) { b.ents.push(makeRec(type, pairs, extra)); return; }
+    if (isSpace) doc.entities.push(makeRec(type, [...pairs, [330, owner]], extra));
+  };
+}
 function injectOles(doc, oles) {
   if (!oles || !oles.length) return;
-  const byHandle = new Map(); for (const [h, nm] of doc.blockRecords) byHandle.set(h, nm);
+  const place = placer(doc);
   // 有的版本 DXF 输出里已经带了 OLE2FRAME：按角点去重；DXF 里那条没有数据时把数据补给它
   const key = (x, y) => Math.round(x * 1000) + ',' + Math.round(y * 1000);
   const have = new Map();
   const scan = ents => { for (const r of ents) if (r.type === 'OLE2FRAME') have.set(key(r.f(10), r.f(20)), r); };
   scan(doc.entities); for (const b of doc.blocks.values()) scan(b.ents);
-  // 哪些空间的图元写在 ENTITIES 段（当前布局和模型），其余布局的图元在 BLOCKS 段里
-  const inEntities = new Set(); for (const r of doc.entities) { const h = r.s(330).toUpperCase(); if (h) inEntities.add(h); }
   for (const o of oles) {
     const old = have.get(key(o.p1[0], o.p1[1]));
     if (old) { if (!old.has(310)) old._ole = o.data; continue; }
     const pairs = [[8, doc.layerHandles.get(o.layer) || '0'], [10, o.p1[0]], [20, o.p1[1]], [11, o.p2[0]], [21, o.p2[1]]];
-    const rec = makeRec('OLE2FRAME', pairs, { _ole: o.data });
-    const bn = o.mode === 0 ? (byHandle.get(o.owner) || '') : '';
-    if (o.mode === 1) { pairs.push([67, 1]); doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data })); continue; }
-    if (!bn || o.mode === 2) { doc.entities.push(rec); continue; }
-    const b = doc.blocks.get(bn.toUpperCase());
-    const isSpace = /^\*(MODEL|PAPER)_SPACE/i.test(bn);
-    if (isSpace && inEntities.has(o.owner)) { pairs.push([330, o.owner]); doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data })); continue; }
-    if (b) { b.ents.push(rec); continue; }
-    if (isSpace) { pairs.push([330, o.owner]); doc.entities.push(makeRec('OLE2FRAME', pairs, { _ole: o.data })); }
+    place('OLE2FRAME', pairs, o.mode, o.owner, { _ole: o.data });
   }
+}
+// 天正对象：读出的文字和它们自带的线框转成普通 TEXT / MTEXT / LINE / CIRCLE。
+// 墙、柱、楼梯等只有图形的天正对象仍然无法显示，记入"暂不显示"
+function injectTch(doc, tch) {
+  if (!tch) return 0;
+  const place = placer(doc);
+  let td = null; try { td = new TextDecoder(ansiOf(doc)); } catch (e) { td = new TextDecoder('gbk'); }
+  const dec = u => tchMarkup(td.decode(u));
+  let n = 0;
+  for (const it of tch.items) {
+    let recs = [];
+    try { recs = tchBuild(it.f, dec); } catch (e) { recs = []; }
+    if (!recs.length) continue;
+    const lay = doc.layerHandles.get(it.layer) || '0';
+    const st = it.style && doc.styleHandles.get(it.style);
+    for (const { type, pairs } of recs) {
+      pairs.unshift([8, lay], [62, it.color]);
+      if (st && (type === 'TEXT' || type === 'MTEXT')) pairs.push([7, st]);
+      place(type, pairs, it.mode, it.owner, { _tch: it.f.kind });
+    }
+    n++;
+  }
+  return n;
+}
+function tchSkipped(tch) {
+  const out = {};
+  if (!tch) return out;
+  for (const [k, v] of Object.entries(tch.counts)) if (/^TCH_/.test(k) && (!tch.decoded || !TCH_CLASSES.has(k))) out[k] = v;
+  if (tch.decoded) for (const [k, v] of Object.entries(tch.failed || {})) out[k + '?'] = v;
+  return out;
 }
 function errText(code) {
   if (code & 2048) return '图纸版本过新或不受支持。可以在 CAD 软件里另存为 2007 或更早版本后再打开';
@@ -101,13 +140,13 @@ function collect(scene, list = []) {
 async function open(id, name, bytes) {
   const t0 = performance.now();
   const lower = name.toLowerCase();
-  let dxfBytes = bytes, warn = 0, version = '', oles = null;
+  let dxfBytes = bytes, warn = 0, version = '', oles = null, tch = null;
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
     const m = await lib();
     const r = dwgToDxf(m, bytes);
-    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles;
+    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
   }
@@ -115,19 +154,21 @@ async function open(id, name, bytes) {
   const { text, enc } = decodeDxf(dxfBytes);
   const doc = parseDxf(text);
   injectOles(doc, oles);
+  const tchTexts = injectTch(doc, tch);
   if (!version) { const v = doc.header.$ACADVER; version = v && v[0] ? v[0][1] : 'DXF'; }
   const t1 = performance.now();
   const scene = buildScene(doc);
+  for (const [k, v] of Object.entries(tchSkipped(tch))) scene.stats.skipped[k] = v;
   const t2 = performance.now();
-  docs.set(id, { bytes: dxfBytes.slice(), enc, warn });
-  scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn };
+  docs.set(id, { bytes: dxfBytes.slice(), enc, warn, oles, tch });
+  scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts };
   return scene;
 }
 function textOf(D) { return decodeDxf(D.bytes).text; }
 function docOf(id) {
   const D = docs.get(id);
   if (!D) return null;
-  if (!D.doc) D.doc = parseDxf(textOf(D));
+  if (!D.doc) { D.doc = parseDxf(textOf(D)); injectOles(D.doc, D.oles); injectTch(D.doc, D.tch); }
   return D.doc;
 }
 function verName(v) {
