@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.5] – Preview – 2026-11-10
+
+### Fixed
+- MONOTXT and IDQSTYLE text that a single-line font could only draw as a speck now uses the built-in font for the whole line, so the design-note tables show the characters instead of a dot in each cell.
+
 ## [0.2.4] – Preview – 2026-11-10
 
 ### Fixed

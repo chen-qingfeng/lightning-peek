@@ -43,6 +43,13 @@ test('shapes SHX draws a glyph and reports its advance', () => {
   assert.deepEqual(lay.lines[0].slice(0, 4), [0, 0, 0, 8]);
 });
 
+test('a shape that is only a speck does not keep the line', () => {
+  // 字高 8，笔画只走到 1，和格子相比就是一个点
+  const font = parseShx(shapesFont([[65, [8, 0, 1, 8, 1, 0, 0]]]));
+  assert.equal(font.baseUp, 8);
+  assert.equal(layoutShx('AAAA', font, null), null);
+});
+
 test('a shapes font that drops a Chinese character gives the line back to the system font', () => {
   const font = parseShx(shapesFont([[65, [8, 0, 8, 8, 6, 0, 2, 8, 2, -8 & 255, 0]]]));
   assert.equal(layoutShx('AAAA中', font, null), null);
@@ -86,7 +93,7 @@ test('the bundled Chinese font is part of every fallback stack', () => {
 
 test('bigfont subshapes advance instead of stacking', () => {
   // 子形 3：提笔走到 x=10。一个字引用它两次，总宽应是 20，而不是叠在原点。
-  const font = parseShx(bigFont([[3, [2, 8, 10, 0, 0]], [0xd6d0, [7, 3, 7, 3, 0]]]));
+  const font = parseShx(bigFont([[3, [1, 8, 0, 8, 2, 8, 10, 0, 0]], [0xd6d0, [7, 3, 7, 3, 0]]]));
   const ch = new TextDecoder('gbk').decode(new Uint8Array([0xd6, 0xd0]));
   const lay = layoutShx(ch, null, font);
   assert.ok(lay);

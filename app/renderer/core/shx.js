@@ -469,5 +469,14 @@ export function layoutShx(str, primary, big) {
     x += step > 0 ? step : up * 0.5;
   }
   if (!hit || cjkMiss || miss > hit) return null;
+  // 字形比字高小一截时，多半是这份 SHX 的比例不对（MONOTXT、HZFS 一类）。
+  // 交给系统字体，避免格子里只剩一个小点。
+  let minY = Infinity, maxY = -Infinity;
+  for (const pl of lines) for (let k = 1; k < pl.length; k += 2) {
+    const y = pl[k];
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  if (!(maxY - minY >= up * 0.45)) return null;
   return { lines, width: x, up, down };
 }
