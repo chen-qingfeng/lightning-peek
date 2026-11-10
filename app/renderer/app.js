@@ -2243,7 +2243,7 @@ function helpPanel(body) {
   if (B.fontInfo) {
     const dirs = state.fontDirs || [];
     body.append(h('h4', { text: tr('CAD 字体'), style: 'margin:0 0 6px;font-size:12px;color:#5b6676' }));
-    body.append(h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;line-height:1.6;margin-bottom:8px', text: tr('打开图纸就会自动找本机字体：先用图纸里写的文件；没有时名字里带 hz 的大字体（hztxt.shx、gbcbig.shx、hzfs.shx、gbhzfs.shx）互相替，西文 simplex.shx、txt.shx、complex.shx、gbenor.shx、monotxt.shx、gbxwxt.shx 互相替。认不出的 SHX（例如 IDQSTYLE）也按这套标准字体显示，缺一个汉字就把整行改成软件自带的中文。行宽按图纸来：有文字框的不超过文字框，原来是单线字的按单线字的行宽来画，不压住旁边的字。宋体、黑体用 Windows 里已经安装的。这些字体不随软件分发。下面的文件夹可以不选。') }));
+    body.append(h('div', { cls: 'k', style: 'color:#5b6676;font-size:11px;line-height:1.6;margin-bottom:8px', text: tr('打开图纸就会自动找本机字体：先用图纸里写的文件；没有时名字里带 hz 的大字体（hztxt.shx、gbcbig.shx、hzfs.shx、gbhzfs.shx）互相替，西文 simplex.shx、txt.shx、complex.shx、gbenor.shx、monotxt.shx、gbxwxt.shx 互相替。认不出的 SHX（例如 IDQSTYLE）也按这套标准字体显示，缺一个汉字就把整行改成软件自带的中文。2007 的天正文字从对象里读出来，也用这套中文来画。行宽按图纸来：有文字框的不超过文字框，原来是单线字的按单线字的行宽来画，不压住旁边的字。宋体、黑体用 Windows 里已经安装的。这些字体不随软件分发。下面的文件夹可以不选。') }));
     body.append(h('div', { style: 'font-size:12px;line-height:1.5;margin-bottom:8px;word-break:break-all;white-space:pre-wrap', text: dirs.length ? dirs.join('\n') : tr('这台电脑上还没找到 AutoCAD 或 Windows 字体目录。不选也能看字。') }));
     body.append(h('div', { style: 'font-size:12px;margin-bottom:8px', text: tr('已找到 {0} 个字体文件', state.fontCount || 0) }));
     body.append(h('div', { cls: 'row', style: 'margin-bottom:14px' },

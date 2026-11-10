@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.9] – Preview – 2026-11-10
+
+### Fixed
+- AutoCAD 2007 Tianzheng text is read from the object's string stream and drawn with the built-in Chinese font. Notes, section marks and drawing names on a 2007 heating drawing show up without a Tianzheng plugin and without shipping the drawing's SHX files.
+
 ## [0.2.8] – Preview – 2026-11-10
 
 ### Fixed

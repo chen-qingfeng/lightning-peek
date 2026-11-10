@@ -29,9 +29,10 @@ function dwgToDxf(m, bytes) {
     let oles = [], tch = null;
     if (dwg && err < 128) {
       try { oles = extractOles(m, dwg); } catch (e) { console.warn('OLE', e); if (wasmTrap(e)) wasm = null; }
-      // 天正文字的位流格式只在 2000/2004 图纸上核实过；2007 起字符串另存在字符串流里，不按这个格式读
+      // 2000/2004 按字段顺序读。2007 的文字在字符串流里，不能沿用旧顺序。
       const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
-      if (wasm) { try { tch = extractTch(m, dwg, hex, ver === 'AC1015' || ver === 'AC1018'); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
+      const mode = ver === 'AC1015' || ver === 'AC1018' ? 1 : ver === 'AC1021' ? 2 : 0;
+      if (wasm) { try { tch = extractTch(m, dwg, hex, mode); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
     }
     return { bytes: out, warn: err, oles, tch };
   } finally {
@@ -124,8 +125,9 @@ function injectTch(doc, tch) {
 function tchSkipped(tch) {
   const out = {};
   if (!tch) return out;
-  for (const [k, v] of Object.entries(tch.counts)) if (/^TCH_/.test(k) && (!tch.decoded || !TCH_CLASSES.has(k))) out[k] = v;
-  if (tch.decoded) for (const [k, v] of Object.entries(tch.failed || {})) out[k + '?'] = v;
+  const drawn = new Set((tch.items || []).map(it => it.cls).filter(Boolean));
+  for (const [k, v] of Object.entries(tch.counts)) if (/^TCH_/.test(k) && !drawn.has(k) && (!tch.decoded || !TCH_CLASSES.has(k))) out[k] = v;
+  if (tch.decoded) for (const [k, v] of Object.entries(tch.failed || {})) if (!drawn.has(k)) out[k + '?'] = v;
   return out;
 }
 function errText(code) {

@@ -1,7 +1,7 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup } from '../app/renderer/core/tarch.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild } from '../app/renderer/core/tarch.js';
 import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
 
 class W {
@@ -88,7 +88,7 @@ test('2007 MTEXT split inside a UTF-8 character is rejoined', () => {
   assert.equal(joined, '接口不得采用');
 });
 
-import { decodeTchAny, tchBuild } from '../app/renderer/core/tarch.js';
+import { decodeTchAny } from '../app/renderer/core/tarch.js';
 const dec = u => new TextDecoder('gbk').decode(u);
 function tchHeader(w, scale = 100, ver = 768) { w.RC(4); w.BD(scale); w.BS(0); w.RS(ver); }
 
@@ -124,4 +124,25 @@ test('TCH_DRAWINGNAME: name, scale and circled-number markup', () => {
   const f = decodeTchAny('TCH_DRAWINGNAME', w.bytes(), w.bits.length);
   const texts = tchBuild(f, u => tchMarkup(dec(u))).filter(r => r.type === 'TEXT').map(r => Object.fromEntries(r.pairs)[1]);
   assert.deepEqual(texts, ['①立面图', '1:100']);
+});
+
+test('2007 Tianzheng text is read from the string stream, not the 2000 field order', () => {
+  const pair = ch => {
+    const v = ch.charCodeAt(0) ^ 4;
+    return String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26));
+  };
+  // 写进去的十进制会在第 0、2 位各垫一个字符，读的时候去掉
+  assert.equal(tgNumber(pair('X') + pair('5') + pair('Y') + pair('.') + pair('2')), 5.2);
+  assert.equal(tgNumber('线下文字页宽'), NaN);
+
+  const w = new W();
+  w.put(0, 96); w.RD(4786700); w.put(0, 4); w.RD(567700);
+  w.put(1, 2); w.RC(1); w.RC(0x32); w.RC(0x75); // “甲”
+  w.RS(26); w.put(1, 1);
+  const f = decodeTchStream('TCH_TEXT', w.bytes(), w.bits.length, w.bits.length);
+  assert.equal(f.text, '甲');
+  assert.ok(Math.abs(f.x - 567700) < 1e-6);
+  assert.ok(Math.abs(f.y - 4786700) < 1e-6);
+  const drawn = tchBuild(f, () => { throw new Error('unicode text is already decoded'); }).find(r => r.type === 'TEXT');
+  assert.equal(Object.fromEntries(drawn.pairs)[1], '甲');
 });

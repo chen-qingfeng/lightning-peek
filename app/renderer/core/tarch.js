@@ -100,6 +100,114 @@ export function tchPairs(f, text) {
   return { type: 'MTEXT', pairs };
 }
 
+// 2007 起天正把文字放进对象末尾的字符串流，数字用一对字符表示一位十进制。
+// 这里只负责把字读出来。字高、坐标对不上这张图的范围时放弃，不拿一个错位置去画。
+const TG_KEY = 0x24;
+const TG_SKIP = new Set(['线下文字页宽', '圆点大小']);
+export function tgNumber(s) {
+  if (!s || s.length < 2 || s.length % 2) return NaN;
+  let raw = '';
+  for (let i = 0; i + 1 < s.length; i += 2) {
+    const a = s.charCodeAt(i) & 0xff, b = s.charCodeAt(i + 1) & 0xff;
+    if (a < TG_KEY || a > TG_KEY + 25 || b < TG_KEY || b > TG_KEY + 25) return NaN;
+    raw += String.fromCharCode((((a - TG_KEY) * 26 + (b - TG_KEY)) ^ 4) & 0xff);
+  }
+  const cut = raw.length < 4 ? (raw[1] || '') : raw[1] + raw.slice(3);
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(cut)) return NaN;
+  const v = parseFloat(cut);
+  return Number.isFinite(v) ? v : NaN;
+}
+function tgCipher(s) {
+  return !!s && s.length % 2 === 0 && [...s].every(c => { const o = c.charCodeAt(0); return (o >> 8) === 3 && (o & 0xff) >= TG_KEY && (o & 0xff) <= TG_KEY + 25; });
+}
+function tgHuman(s) {
+  if (!s || tgCipher(s) || TG_SKIP.has(s)) return false;
+  if (/^TDBX|^T20/.test(s) || /^\{[0-9A-Fa-f-]{36}\}$/.test(s)) return false;
+  if (/[⺀-鿿]/.test(s)) return true;
+  return /^[A-Za-z]?\d{1,4}$/.test(s) || /^\d+\s*:\s*\d+$/.test(s);
+}
+function rsBits(bytes, nbits, p) {
+  const r = new Bits(bytes, nbits); r.p = p;
+  return r.RS();
+}
+// 字符串流的长度写在句柄区前面。只有把字符串逐条走完正好落在长度字段上，才算找对了。
+function findTchStream(bytes, nbits, handleOffset) {
+  const nb = handleOffset > 0 && handleOffset <= nbits ? handleOffset : nbits;
+  for (let endbit = Math.min(nb, nbits - 1); endbit > Math.max(32, nb - 20000); endbit--) {
+    const probe = new Bits(bytes, nbits); probe.p = endbit;
+    let has; try { has = probe.bit(); } catch (e) { continue; }
+    if (!has) continue;
+    let sizeAt = endbit - 16;
+    if (sizeAt < 0) continue;
+    let size = rsBits(bytes, nbits, sizeAt);
+    if (size & 0x8000) {
+      const hi = sizeAt - 16;
+      if (hi < 0) continue;
+      size = (size & 0x7fff) | (rsBits(bytes, nbits, hi) << 15);
+      sizeAt = hi;
+    }
+    const start = sizeAt - size;
+    if (start < 0 || start >= sizeAt || size < 16) continue;
+    const reader = new Bits(bytes, nbits); reader.p = start;
+    let guard = 0, okFill = true;
+    while (reader.p < sizeAt) {
+      if (++guard > 4000) { okFill = false; break; }
+      let length; try { length = reader.BS(); } catch (e) { okFill = false; break; }
+      if (length < 0 || length > 2048) { okFill = false; break; }
+      const next = reader.p + length * 16;
+      if (next > sizeAt) { okFill = false; break; }
+      reader.p = next;
+    }
+    if (okFill && reader.p === sizeAt) return { start, sizeAt };
+  }
+  return null;
+}
+function readTchStrings(bytes, nbits, span) {
+  const out = [];
+  const reader = new Bits(bytes, span.sizeAt); reader.p = span.start;
+  while (reader.p < span.sizeAt && out.length < 80) {
+    const length = reader.BS();
+    let s = '';
+    for (let i = 0; i < length; i++) s += String.fromCharCode(reader.RC() | (reader.RC() << 8));
+    out.push(s);
+  }
+  return out;
+}
+const onSheet = v => Number.isFinite(v) && Math.abs(v) < 1e8 && Math.abs(v) > 0.5;
+function heightAt(strs, index, lo, hi, fallback) {
+  const v = tgNumber(strs[index]);
+  return v >= lo && v <= hi ? v : fallback;
+}
+// AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
+export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
+  let span, strs;
+  try {
+    span = findTchStream(bytes, nbits, hdlOff);
+    if (!span) return null;
+    strs = readTchStrings(bytes, nbits, span);
+  } catch (e) { return null; }
+  const texts = strs.filter(tgHuman);
+  if (!texts.length) return null;
+  let x, y;
+  try {
+    if (kind === 'TCH_TEXT' || kind === 'TCH_MTEXT') { y = rdAt(bytes, nbits, 96); x = rdAt(bytes, nbits, span.start - 64); }
+    else if (kind === 'TCH_ARROW') { x = rdAt(bytes, nbits, 86); y = rdAt(bytes, nbits, 150); }
+    else if (kind === 'TCH_COMPOSING') { y = rdAt(bytes, nbits, 134); x = rdAt(bytes, nbits, 198); }
+    else if (kind === 'TCH_SYMB_SECTION') { y = rdAt(bytes, nbits, 74); x = rdAt(bytes, nbits, 138); }
+    else if (kind === 'TCH_DRAWINGNAME') { y = rdAt(bytes, nbits, 44); x = rdAt(bytes, nbits, 112); }
+    else return null;
+  } catch (e) { return null; }
+  if (!onSheet(x) || !onSheet(y)) return null;
+  const body = texts.join('\n');
+  const multi = /[\r\n]/.test(body) || texts.length > 1;
+  const h = heightAt(strs, 2, 0.8, 20, multi ? 2.5 : 2);
+  if (kind === 'TCH_DRAWINGNAME') {
+    const tall = strs.map(tgNumber).filter(v => v >= 4 && v <= 15);
+    return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
+  }
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : 10, width: 0, text: body };
+}
+
 // ---------- 其它天正对象 ----------
 // 下面各类的位流格式同样是从实际图纸反推、并用图中已有的普通图元核对过的。所有长度类数值都是图纸毫米，
 // 乘对象头里的出图比例后才是图形单位。
@@ -299,7 +407,7 @@ export function tchBuild(f, dec) {
   const sc = f.scale, out = [];
   switch (f.kind) {
     case 'TCH_TEXT': case 'TCH_MTEXT': {
-      const s = dec(f.raw); if (!s.trim()) return out;
+      const s = f.text != null ? tchMarkup(f.text) : dec(f.raw); if (!s.trim()) return out;
       out.push(tchPairs(f, s)); return out;
     }
     case 'TCH_ELEVATION': {
@@ -331,7 +439,8 @@ export function tchBuild(f, dec) {
       return out;
     }
     case 'TCH_DRAWINGNAME': {
-      const s = dec(f.raw).trim(), s2 = dec(f.raw2).trim(); if (!s && !s2) return out;
+      const s = (f.text != null ? tchMarkup(f.text) : dec(f.raw)).trim();
+      const s2 = (f.text2 != null ? tchMarkup(f.text2) : dec(f.raw2 || new Uint8Array())).trim(); if (!s && !s2) return out;
       const H = f.h * sc, H2 = f.h2 * sc, w = estW(s, H);
       const yb = f.y + sc;
       if (s) out.push(TXT(f.x, yb, H, 0, 1, 0, s));
@@ -417,7 +526,10 @@ export function tchBuild(f, dec) {
 // 从 LibreDWG（wasm）里取出天正对象。结构体偏移是针对随软件附带的 libredwg-web.wasm 的，读到的
 // 数据不符合预期时直接放弃，不会影响图纸其余部分。
 // 返回 { items: [{ f, layer, color, style, mode, owner }], counts: { 类名: 个数 }, failed: { 类名: 个数 } }
-export function extractTch(m, dwg, hex, decode = true) {
+const STREAM_CLASSES = new Set(['TCH_TEXT', 'TCH_MTEXT', 'TCH_ARROW', 'TCH_COMPOSING', 'TCH_SYMB_SECTION', 'TCH_DRAWINGNAME']);
+export function extractTch(m, dwg, hex, mode = true) {
+  const stream = mode === 2;
+  const decode = stream || mode === true || mode === 1;
   const items = [], counts = {}, failed = {};
   const nc = m.dwg_get_num_classes(dwg); const cls = new Map();
   for (let i = 0; i < nc; i++) { const c = m.dwg_get_class(dwg, i); if (c) cls.set(c.num, String(c.dxfname || '').replace(/\0+$/, '')); }
@@ -430,7 +542,8 @@ export function extractTch(m, dwg, hex, decode = true) {
       if (!obj || m.dwg_object_get_fixedtype(obj) !== 65534) continue; // UNKNOWN_ENT
       name = cls.get(m.dwg_object_get_type(obj)) || '?';
       counts[name] = (counts[name] || 0) + 1;
-      if (!decode || !TCH_CLASSES.has(name)) continue;
+      const known = stream ? STREAM_CLASSES.has(name) : TCH_CLASSES.has(name);
+      if (!decode || !known) continue;
       const U = m.HEAPU32, B = m.HEAPU8; // wasm 内存可能在循环中扩容，每次重新取视图
       const w = obj >> 2;
       // Dwg_Object: [0] size [2] type [4] fixedtype [18] bitsize [27] num_unknown_bits [28] unknown_bits
@@ -440,7 +553,7 @@ export function extractTch(m, dwg, hex, decode = true) {
         if (ptr > 0 && nb > 0 && nb <= size * 8 && ptr + Math.ceil(nb / 8) <= B.length) {
           const bytes = B.slice(ptr, ptr + Math.ceil(nb / 8));
           const start = size * 8 - nb; // 天正数据在对象里的起点
-          f = decodeTchAny(name, bytes, nb, bitsize > start ? bitsize - start : -1);
+          f = stream ? decodeTchStream(name, bytes, nb, bitsize > start ? bitsize - start : -1) : decodeTchAny(name, bytes, nb, bitsize > start ? bitsize - start : -1);
         }
       }
       if (!f) { failed[name] = (failed[name] || 0) + 1; continue; }
@@ -450,7 +563,7 @@ export function extractTch(m, dwg, hex, decode = true) {
       try { const o = ent && m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
       try { const l = ent && m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
       try { const c = tio && m.dwg_dynapi_common_value(tio, 'color'); if (c && c.success && c.data && Number.isFinite(c.data.index)) color = c.data.index; } catch (e) { /* ignore */ }
-      items.push({ f, mode, owner, layer, color, style: f.style ? hex(f.style) : '' });
+      items.push({ f, cls: name, mode, owner, layer, color, style: f.style ? hex(f.style) : '' });
     } catch (e) {
       failed[name] = (failed[name] || 0) + 1;
       if (/memory access out of bounds/.test(String(e && e.message || e))) return { items, counts, failed, decoded: decode, trap: true };
