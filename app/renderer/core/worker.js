@@ -12,24 +12,33 @@ async function lib() {
 }
 const docs = new Map();
 
+const wasmTrap = e => /memory access out of bounds|^Aborted\(/.test(String(e && e.message || e));
 function dwgToDxf(m, bytes) {
   const inF = '/in_' + Date.now() + '.dwg', outF = inF.replace('.dwg', '.dxf');
   m.FS.writeFile(inF, bytes);
+  let dwg = 0;
   try {
     const r = m.dwg_read_file(inF);
     const err = r && typeof r.error === 'number' ? r.error : 0;
-    let oles = [], tch = null;
-    if (r && r.data && err < 128) { try { oles = extractOles(m, r.data); } catch (e) { console.warn('OLE', e); } }
-    // 天正文字的位流格式只在 2000/2004 图纸上核实过；2007 起字符串另存在字符串流里，不按这个格式读
-    const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
-    if (r && r.data && err < 128) { try { tch = extractTch(m, r.data, hex, ver === 'AC1015' || ver === 'AC1018'); } catch (e) { console.warn('TArch', e); } }
-    if (r && r.data && m.dwg_free) { try { m.dwg_free(r.data); } catch (e) { /* ignore */ } }
+    dwg = r && r.data || 0;
     if (err >= 128) throw new Error(errText(err));
+    // 先把 DXF 复制出来。后面读天正、OLE 时若 wasm 越界，普通图元仍然能打开。
     const rc = m.dwg_write_dxf(inF, outF);
     if (rc >= 128 || !m.FS.analyzePath(outF).exists) throw new Error(errText(rc || err));
-    const out = m.FS.readFile(outF);
+    const out = new Uint8Array(m.FS.readFile(outF));
+    let oles = [], tch = null;
+    if (dwg && err < 128) {
+      try { oles = extractOles(m, dwg); } catch (e) { console.warn('OLE', e); if (wasmTrap(e)) wasm = null; }
+      // 天正文字的位流格式只在 2000/2004 图纸上核实过；2007 起字符串另存在字符串流里，不按这个格式读
+      const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
+      if (wasm) { try { tch = extractTch(m, dwg, hex, ver === 'AC1015' || ver === 'AC1018'); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
+    }
     return { bytes: out, warn: err, oles, tch };
+  } catch (e) {
+    if (wasmTrap(e)) wasm = null;
+    throw e;
   } finally {
+    if (dwg && wasm && m.dwg_free) { try { m.dwg_free(dwg); } catch (e) { if (wasmTrap(e)) wasm = null; } }
     try { m.FS.unlink(inF); } catch (e) { /* ignore */ }
     try { m.FS.unlink(outF); } catch (e) { /* ignore */ }
   }
@@ -40,19 +49,21 @@ function extractOles(m, dwg) {
   const out = [];
   const n = m.dwg_get_num_objects(dwg);
   for (let i = 0; i < n; i++) {
-    const obj = m.dwg_get_object(dwg, i);
-    if (!obj || m.dwg_object_get_fixedtype(obj) !== 74) continue; // 74 = OLE2FRAME
-    const et = m.dwg_object_to_entity_tio(obj);
-    const ent = m.dwg_object_to_entity(obj);
-    const d = m.dwg_entity_ole2frame_get_data(et);
-    const data = d && d.data; if (!data || !data.length) continue;
-    const p1 = m.dwg_dynapi_entity_value(et, 'pt1')?.data, p2 = m.dwg_dynapi_entity_value(et, 'pt2')?.data;
-    if (!p1 || !p2) continue;
-    let mode = 2, owner = '', layer = '';
-    try { mode = m.dwg_object_entity_get_entmode(ent); } catch (e) { /* ignore */ }
-    try { const o = m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
-    try { const l = m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
-    out.push({ data: new Uint8Array(data), p1: [p1.x, p1.y], p2: [p2.x, p2.y], mode, owner, layer });
+    try {
+      const obj = m.dwg_get_object(dwg, i);
+      if (!obj || m.dwg_object_get_fixedtype(obj) !== 74) continue; // 74 = OLE2FRAME
+      const et = m.dwg_object_to_entity_tio(obj);
+      const ent = m.dwg_object_to_entity(obj);
+      const d = m.dwg_entity_ole2frame_get_data(et);
+      const data = d && d.data; if (!data || !data.length) continue;
+      const p1 = m.dwg_dynapi_entity_value(et, 'pt1')?.data, p2 = m.dwg_dynapi_entity_value(et, 'pt2')?.data;
+      if (!p1 || !p2) continue;
+      let mode = 2, owner = '', layer = '';
+      try { mode = m.dwg_object_entity_get_entmode(ent); } catch (e) { /* ignore */ }
+      try { const o = m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
+      try { const l = m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
+      out.push({ data: new Uint8Array(data), p1: [p1.x, p1.y], p2: [p2.x, p2.y], mode, owner, layer });
+    } catch (e) { if (wasmTrap(e)) throw e; }
   }
   return out;
 }

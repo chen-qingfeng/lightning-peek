@@ -424,33 +424,37 @@ export function extractTch(m, dwg, hex, decode = true) {
   if (!m.HEAPU32 || !m.HEAPU8) return { items, counts, failed, decoded: false };
   const n = m.dwg_get_num_objects(dwg);
   for (let i = 0; i < n; i++) {
-    const obj = m.dwg_get_object(dwg, i);
-    if (!obj || m.dwg_object_get_fixedtype(obj) !== 65534) continue; // UNKNOWN_ENT
-    const name = cls.get(m.dwg_object_get_type(obj)) || '?';
-    counts[name] = (counts[name] || 0) + 1;
-    if (!decode || !TCH_CLASSES.has(name)) continue;
-    let f = null;
+    let name = '?';
     try {
+      const obj = m.dwg_get_object(dwg, i);
+      if (!obj || m.dwg_object_get_fixedtype(obj) !== 65534) continue; // UNKNOWN_ENT
+      name = cls.get(m.dwg_object_get_type(obj)) || '?';
+      counts[name] = (counts[name] || 0) + 1;
+      if (!decode || !TCH_CLASSES.has(name)) continue;
       const U = m.HEAPU32, B = m.HEAPU8; // wasm 内存可能在循环中扩容，每次重新取视图
       const w = obj >> 2;
       // Dwg_Object: [0] size [2] type [4] fixedtype [18] bitsize [27] num_unknown_bits [28] unknown_bits
-      if (U[w + 4] === 65534 && U[w + 2] === m.dwg_object_get_type(obj)) {
+      let f = null;
+      if (U && w >= 0 && w + 28 < U.length && U[w + 4] === 65534 && U[w + 2] === m.dwg_object_get_type(obj)) {
         const size = U[w], bitsize = U[w + 18], nb = U[w + 27], ptr = U[w + 28];
-        if (ptr && nb && nb <= size * 8 && ptr + Math.ceil(nb / 8) <= B.length) {
+        if (ptr > 0 && nb > 0 && nb <= size * 8 && ptr + Math.ceil(nb / 8) <= B.length) {
           const bytes = B.slice(ptr, ptr + Math.ceil(nb / 8));
           const start = size * 8 - nb; // 天正数据在对象里的起点
           f = decodeTchAny(name, bytes, nb, bitsize > start ? bitsize - start : -1);
         }
       }
-    } catch (e) { f = null; }
-    if (!f) { failed[name] = (failed[name] || 0) + 1; continue; }
-    const ent = m.dwg_object_to_entity(obj), tio = m.dwg_object_to_entity_tio(obj);
-    let mode = 2, owner = '', layer = '', color = 256;
-    try { mode = m.dwg_object_entity_get_entmode(ent); } catch (e) { /* ignore */ }
-    try { const o = m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
-    try { const l = m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
-    try { const c = m.dwg_dynapi_common_value(tio, 'color'); if (c && c.success && c.data && Number.isFinite(c.data.index)) color = c.data.index; } catch (e) { /* ignore */ }
-    items.push({ f, mode, owner, layer, color, style: f.style ? hex(f.style) : '' });
+      if (!f) { failed[name] = (failed[name] || 0) + 1; continue; }
+      const ent = m.dwg_object_to_entity(obj), tio = m.dwg_object_to_entity_tio(obj);
+      let mode = 2, owner = '', layer = '', color = 256;
+      try { if (ent) mode = m.dwg_object_entity_get_entmode(ent); } catch (e) { /* ignore */ }
+      try { const o = ent && m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
+      try { const l = ent && m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
+      try { const c = tio && m.dwg_dynapi_common_value(tio, 'color'); if (c && c.success && c.data && Number.isFinite(c.data.index)) color = c.data.index; } catch (e) { /* ignore */ }
+      items.push({ f, mode, owner, layer, color, style: f.style ? hex(f.style) : '' });
+    } catch (e) {
+      failed[name] = (failed[name] || 0) + 1;
+      if (/memory access out of bounds/.test(String(e && e.message || e))) return { items, counts, failed, decoded: decode, trap: true };
+    }
   }
   return { items, counts, failed, decoded: decode };
 }

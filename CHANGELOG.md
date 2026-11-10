@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.1.9] – Preview – 2026-11-10
+
+### Fixed
+- Opening a drawing no longer fails with “memory access out of bounds” when a TArch or OLE object makes LibreDWG touch memory it should not. The plain drawing is converted first. If that extra read still faults, the drawing opens without those objects, and the converter is reloaded before the next file.
+
 ## [0.1.8] – Preview – 2026-11-10
 
 ### Fixed
