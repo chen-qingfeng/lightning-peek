@@ -4,7 +4,7 @@
   font-family: "Microsoft YaHei", "微软雅黑", "PingFang SC", "Noto Sans CJK SC", sans-serif;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; color: var(--ink); font-size: 13px; user-select: none; }
+html, body { margin: 0; height: 100%; height: 100dvh; overflow: hidden; color: var(--ink); font-size: 13px; user-select: none; touch-action: none; }
 #app { display: flex; flex-direction: column; height: 100%; }
 button { font: inherit; color: inherit; }
 .hidden { display: none !important; }
@@ -134,3 +134,22 @@ table.keys td { padding: 4px 4px; border-bottom: 1px solid #f0f2f5; }
 .layer:hover .iso { visibility: visible; }
 .layer .iso:hover { background: var(--active); }
 .disclaimer { font-size: 11px; color: #8a5a00; background: #fff8e6; border: 1px solid #f2dfa8; border-radius: 6px; padding: 6px 8px; margin-bottom: 10px; line-height: 1.5; }
+#file-input { position: fixed; left: -40px; top: 0; width: 1px; height: 1px; opacity: 0; }
+
+@media (max-width: 800px) {
+  #toolbar { padding-top: env(safe-area-inset-top); }
+  #toolbar .tabbtn { padding: 6px 12px; }
+  .tb { min-width: 44px; height: 44px; padding: 4px; }
+  .tb span { display: none; }
+  #side { position: absolute; z-index: 8; top: 0; bottom: 0; left: 0; width: min(92vw, 360px); height: auto; box-shadow: 4px 0 18px rgba(0,0,0,.28); }
+  #empty { padding: 16px; }
+  #empty .logo { flex-direction: column; text-align: center; }
+  #empty h1 { font-size: 26px; }
+  #recent-list { width: 100%; }
+  #status { gap: 8px; overflow-x: auto; padding-bottom: calc(4px + env(safe-area-inset-bottom)); }
+  #st-coord { min-width: 0; font-size: 11px; }
+  #st-info { display: none; }
+  #toast { max-width: 92%; white-space: normal; bottom: calc(18px + env(safe-area-inset-bottom)); }
+  #menu { max-width: 92vw; }
+  .layer .iso { visibility: visible; }
+}

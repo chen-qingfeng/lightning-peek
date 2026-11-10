@@ -2,8 +2,16 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self' app: data: blob:; script-src 'self' app: 'wasm-unsafe-eval'; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: data: blob:; worker-src 'self' app: blob:">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1d2a3a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="闪电看图">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' app: data: blob:; script-src 'self' app: 'wasm-unsafe-eval'; style-src 'self' app: 'unsafe-inline'; img-src 'self' app: data: blob:; worker-src 'self' app: blob:; manifest-src 'self' app:">
 <title>闪电看图</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="../icon.png">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -45,7 +53,7 @@
 </div>
 <div id="modal" class="hidden"><div class="box"><h3 id="m-title"></h3><div id="m-body"></div><div class="btns"><button id="m-cancel">取消</button><button id="m-ok" class="primary">确定</button></div></div></div>
 <div id="menu" class="hidden"></div>
-<input type="file" id="file-input" accept=".dwg,.dxf" multiple hidden>
+<input type="file" id="file-input" accept=".dwg,.dxf,application/octet-stream" multiple>
 <script type="module" src="app.js"></script>
 </body>
 </html>

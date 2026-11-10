@@ -9,7 +9,7 @@
   <a href="README.md">English</a> · <b>简体中文</b>
 </p>
 
-<p align="center"><b>当前版本：v0.1.5 预览版</b>（Windows 10 / 11，64 位）</p>
+<p align="center"><b>当前版本：v0.1.6 预览版</b>（Windows 安装包仍为 v0.1.5；手机用浏览器打开）</p>
 
 面向建筑、市政、钢构、古建一线的总工、施工员、造价人员、资料员、甲方及班组人员。打开图纸的人，大多不是为了画图，而是为了**看、查、统计、核对**。闪电看图只做这一段：不用安装 CAD，把图纸打开，把里面的东西找出来、量出来、比出来。
 
@@ -20,6 +20,12 @@
 👉 [从 Releases 下载 Windows 绿色版](https://github.com/chen-qingfeng/lightning-peek/releases)
 
 这是预览版，只用有限的图纸检验过（见[支持格式](#支持格式与已知限制)）。遇到打不开或显示不对的图纸，欢迎[反馈](https://github.com/chen-qingfeng/lightning-peek/issues/new/choose)。暂不提供 macOS 和 Linux 安装包。
+
+## 手机（安卓和苹果）
+
+手机不另做一套程序。电脑和手机连同一个 Wi-Fi，在电脑的仓库目录运行 `npm run phone`，终端会打印一个地址。用手机自带浏览器打开这个地址，点「打开图纸」选择 DWG 或 DXF。单指移动图纸，双指缩放。
+
+安卓用 Chrome 打开后，菜单里选「添加到主屏幕」。苹果用 Safari 打开后，点分享按钮，选「添加到主屏幕」。之后从图标进入，不再显示浏览器地址栏。应用商店安装包还没有。
 
 ## 主要功能
 

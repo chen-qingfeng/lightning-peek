@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.1.6] – Preview – 2026-11-10
+
+### Added
+- Phone layout for Android and iOS browsers: one finger pans, two fingers zoom, and a drawing can be chosen from the phone's files. Add the page to the home screen from the browser. `npm run phone` serves it on the local network.
+
 ## [0.1.5] – Preview – 2026-11-10
 
 ### Changed

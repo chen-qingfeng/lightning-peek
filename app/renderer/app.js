@@ -1397,9 +1397,20 @@ function cursorPoint(px, py, useSnap = true) {
   return p;
 }
 cv.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+const fingers = new Map();
+let pinch = null;
+function fingerPt(e) { const [px, py] = evPt(e); return { px, py }; }
+function pinchNow() {
+  const pts = [...fingers.values()];
+  if (pts.length < 2) return null;
+  return { dist: Math.hypot(pts[1].px - pts[0].px, pts[1].py - pts[0].py) || 1, mx: (pts[0].px + pts[1].px) / 2, my: (pts[0].py + pts[1].py) / 2 };
+}
 cv.addEventListener('pointerdown', (e) => {
   if (!state.cur) return;
-  cv.setPointerCapture(e.pointerId);
+  try { cv.setPointerCapture(e.pointerId); } catch (err) { /* 部分手机浏览器不支持 */ }
+  fingers.set(e.pointerId, fingerPt(e));
+  if (fingers.size >= 2) { state.drag = null; pinch = pinchNow(); return; }
   const [px, py] = evPt(e);
   if (e.button === 0 && state.cur.kind === 'compare' && state.cur.cmpMode === 'swipe' && Math.abs(px - cv.width * state.cur.swipe) < 18 * DPR) { state.drag = { swipe: true }; return; }
   if (e.button === 0 && !state.tool && state.hover && state.cur.kind === 'drawing' && state.hover.label && state.hover.kind === 'm' && !['angle', 'p2l'].includes(state.hover.item.type)) {
@@ -1418,6 +1429,18 @@ cv.addEventListener('pointerdown', (e) => {
 });
 cv.addEventListener('pointermove', (e) => {
   if (!state.cur) return;
+  if (fingers.has(e.pointerId)) fingers.set(e.pointerId, fingerPt(e));
+  if (pinch && fingers.size >= 2) {
+    const now = pinchNow();
+    if (now) {
+      zoomAt(now.mx, now.my, now.dist / pinch.dist);
+      const v = view(); const [a, b, c, be] = basis();
+      v.cx -= (a * (now.mx - pinch.mx) + b * (now.my - pinch.my)) / v.s;
+      v.cy -= (c * (now.mx - pinch.mx) + be * (now.my - pinch.my)) / v.s;
+      pinch = now; redraw();
+    }
+    return;
+  }
   const [px, py] = evPt(e); state.mouse = [px, py];
   const dr = state.drag;
   if (dr && dr.pan) {
@@ -1470,7 +1493,14 @@ cv.addEventListener('pointermove', (e) => {
   if (!hoverChanged) for (let i = 0; i < prev.length; i++) if (prev[i] !== next[i]) { hoverChanged = true; break; }
   if (state.tool || state.drag || hoverChanged) redraw();
 });
+function endFinger(e) {
+  fingers.delete(e.pointerId);
+  if (fingers.size < 2) pinch = null;
+}
 cv.addEventListener('pointerup', (e) => {
+  const wasPinch = pinch || fingers.size >= 2;
+  endFinger(e);
+  if (wasPinch) { state.drag = null; return; }
   const dr = state.drag; state.drag = null;
   if (!dr || dr.swipe) return;
   if (dr.lab) {
@@ -1498,7 +1528,8 @@ cv.addEventListener('pointerup', (e) => {
 });
 cv.addEventListener('dblclick', (e) => { if (e.button === 1) zoomExtents(); });
 cv.addEventListener('wheel', (e) => { e.preventDefault(); if (!state.cur) return; const [px, py] = evPt(e); zoomAt(px, py, Math.pow(1.0018, -e.deltaY * (e.deltaMode === 1 ? 33 : 1))); }, { passive: false });
-cv.addEventListener('pointerleave', () => { state.snapPt = null; hideTip(); redraw(); });
+cv.addEventListener('pointercancel', (e) => { endFinger(e); state.drag = null; });
+cv.addEventListener('pointerleave', () => { if (fingers.size) return; state.snapPt = null; hideTip(); redraw(); });
 cv.addEventListener('auxclick', (e) => { if (e.button === 1 && e.detail === 2) zoomExtents(); });
 
 async function toolClick(p, screen) {
@@ -2456,6 +2487,7 @@ $('#empty-open').onclick = openDialog;
 window.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; });
 window.addEventListener('drop', async (e) => { e.preventDefault(); for (const f of e.dataTransfer.files) await openFileObj(f); });
 window.addEventListener('resize', () => redraw());
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => redraw());
 
 // ---------------- 启动 ----------------
 function localizeStatic() {
@@ -2464,7 +2496,7 @@ function localizeStatic() {
   $('#empty h1').textContent = tr('闪电看图');
   $('#empty .logo p').textContent = tr('快速查看 CAD 图纸（DWG / DXF）');
   $('#empty-open').textContent = tr('打开图纸');
-  $('#empty .hint').textContent = tr('也可以把图纸文件直接拖进窗口');
+  $('#empty .hint').textContent = window.matchMedia('(max-width: 800px)').matches ? tr('从手机文件里选择 DWG 或 DXF。单指移动，双指缩放。') : tr('也可以把图纸文件直接拖进窗口');
   $('#busy-text').textContent = tr('正在打开…');
   $('#st-snap').textContent = tr('捕捉'); $('#st-snap').title = tr('对象捕捉（F3）');
   $('#st-ortho').textContent = tr('正交'); $('#st-ortho').title = tr('正交（F8）');
@@ -2481,6 +2513,7 @@ function localizeStatic() {
   renderRecent(); refreshToolbar();
   B.onOpenFile((p) => openPath(p));
   if (B.ready) B.ready();
+  if (!window.sdkt && 'serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
   try { const re = JSON.parse(sessionStorage.getItem('lpeek.reopen') || '[]'); sessionStorage.removeItem('lpeek.reopen'); for (const p of re) await openPath(p); } catch (e) { /* 忽略 */ }
   // 测试钩子：?file=URL 直接打开
   const q = new URLSearchParams(location.search).get('file');

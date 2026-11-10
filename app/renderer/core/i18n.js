@@ -502,6 +502,7 @@ export const EN = {
  "快速查看 CAD 图纸（DWG / DXF）": "Quick viewing for CAD drawings (DWG / DXF)",
  "打开图纸": "Open drawing",
  "也可以把图纸文件直接拖进窗口": "or drag a drawing file into this window",
+ "从手机文件里选择 DWG 或 DXF。单指移动，双指缩放。": "Choose a DWG or DXF from your phone. Drag with one finger, pinch to zoom.",
  "正在打开…": "Opening…",
  "捕捉": "Snap",
  "正交": "Ortho",

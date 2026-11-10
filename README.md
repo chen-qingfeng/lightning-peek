@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.1.5 preview</b> (Windows 10 / 11, 64-bit)</p>
+<p align="center"><b>Current version: v0.1.6 preview</b> (the Windows installer on Releases is still v0.1.5; the phone build opens in a browser)</p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 
@@ -20,6 +20,10 @@ Built for people on construction, civil, steel and heritage projects — site en
 👉 [Download the Windows portable build from Releases](https://github.com/chen-qingfeng/lightning-peek/releases)
 
 This is a preview. It has been checked on a limited set of drawings (see [Supported formats](#supported-formats-and-known-limitations)). Please [report](https://github.com/chen-qingfeng/lightning-peek/issues/new/choose) drawings that do not open or display incorrectly. macOS and Linux builds are not available yet.
+
+## Phone (Android and iOS)
+
+There is no separate phone app. On a computer joined to the same Wi-Fi as the phone, run `npm run phone` in this repository and open the printed address in the phone's browser. Choose a DWG or DXF, drag with one finger, and pinch to zoom. Chrome on Android and Safari on iPhone can both use **Add to Home Screen**. Store packages are not published yet.
 
 ## What it does
 
