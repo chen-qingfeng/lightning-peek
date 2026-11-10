@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.7] – Preview – 2026-11-10
+
+### Fixed
+- The column-width rule is now the general case, not only multiline notes. Any text the drawing placed in a column or table cell stays inside that width. Text that was single-line SHX keeps that run width when the built-in font draws it, so a label without a text box does not cover the next line either.
+
 ## [0.2.6] – Preview – 2026-11-10
 
 ### Fixed

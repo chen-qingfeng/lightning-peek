@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseDxf, buildScene, decodeDxf, OP, drawnWidth, layoutTitle, clampRun } from '../app/renderer/core/engine.js';
+import { parseDxf, buildScene, decodeDxf, OP, drawnWidth, approxWidth, layoutTitle, clampRun, runLimit } from '../app/renderer/core/engine.js';
 import { makeXlsx } from '../app/renderer/core/xlsx.js';
 
 const sample = (n) => fs.readFileSync(new URL('../docs/samples/' + n, import.meta.url));
@@ -183,4 +183,23 @@ test('a multiline note is squeezed back inside its column, short lines included'
   assert.equal(clampRun(1.15, 100, 100), 1);
   assert.equal(clampRun(-2, 80, 100), -1.25);
   assert.equal(clampRun(0.5, 10, 0), 0.5);
+});
+
+test('run width follows the drawing for a column and for single-line SHX', () => {
+  const dxf = ['0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'STYLE',
+    '0', 'STYLE', '2', 'HZ', '70', '0', '40', '0', '41', '1', '3', 'txt.shx', '4', 'hztxt.shx',
+    '0', 'ENDTAB', '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'TEXT', '8', '0', '7', 'HZ', '10', '0', '20', '0', '40', '10', '1', '一二三四五六七八九十',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const t = buildScene(parseDxf(dxf)).spaces[0].texts[0];
+  assert.equal(t.sf, 'txt.shx');
+  assert.equal(t.bf, 'hztxt.shx');
+  const limit = runLimit(t, t.s);
+  assert.ok(Math.abs(limit - approxWidth(t.s, t.h)) < 1e-6);
+  assert.ok(drawnWidth(t.s, t.h) > limit);
+  // 文字框比单线字更窄时，以文字框为准
+  assert.equal(runLimit({ ...t, bw: limit / 2 }, t.s), limit / 2);
+  // 宋体这种 TrueType 没有文字框时不收窄
+  assert.equal(runLimit({ s: '一二', h: 10, wf: 1, ff: 'simsun.ttf' }, '一二'), 0);
 });

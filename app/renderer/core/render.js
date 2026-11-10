@@ -1,5 +1,5 @@
 // 闪电看图 · Canvas 渲染器
-import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes, clampRun } from './engine.js';
+import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes, clampRun, runLimit } from './engine.js';
 import { fontLib, layoutShx } from './shx.js';
 
 export function buildPath(ops) {
@@ -234,9 +234,9 @@ export class Renderer {
       let hx = (t.wf > 0 ? t.wf : 1) * t.mx * k;
       if (t.fit) hx = t.fit / t._w * t.mx;
       else {
-        // ks 按整段最长一行计算，短行用同一个比例，字宽才一致。再按实测宽度兜底，不超出文字框。
+        // 整段先用同一个比例，短行和满行的字一样宽；再用行宽模式兜底，不超出文字框，也不超出原来的单线字行宽。
         if (t.ks > 0 && t.ks < 1) hx *= t.ks;
-        hx = clampRun(hx, t._w, t.bw);
+        hx = clampRun(hx, t._w, runLimit(t, shown));
       }
       const tanO = Math.tan(t.obl || 0);
       // 字形坐标 (gx, gy↓) → 局部：U*hx*gx + (−V*k*my − U*hx*tanO)*gy

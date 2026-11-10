@@ -350,12 +350,25 @@ export function drawnWidth(str, h) {
   }
   return w;
 }
-// 多行文字一行的横向比例。advance 是这一行在比例 1 下的宽度，box 是文字框宽度，两者同一单位。
-// hx 可以是负的（镜像）。没有超出文字框时原样返回。
+// 多行文字一行的横向比例。advance 是这一行在比例 1 下的宽度，box 是允许的最大宽度，两者同一单位。
+// hx 可以是负的（镜像）。没有超出时原样返回。
 export function clampRun(hx, advance, box) {
   if (!(box > 0) || !(advance > 0)) return hx;
   if (!(Math.abs(hx) * advance > box)) return hx;
   return (hx < 0 ? -1 : 1) * (box / advance);
+}
+// 行宽模式。任何文字都用这一条，不按某张图单独处理：
+// 有文字框（多行文字、表格格子）就不超过文字框；
+// 样式写的是 SHX、实际改用自带字体时，再不超过原来单线字的行宽（汉字约等于字高）。
+// 没有文字框的标注也因此停在原来的位置，不压住旁边一行。返回 0 表示不限制。
+export function runLimit(t, str) {
+  if (!t) return 0;
+  let limit = t.bw > 0 ? t.bw : 0;
+  if ((t.sf || t.bf) && !t.ff) {
+    const nominal = approxWidth(str == null ? (t.sg || t.s || '') : str, t.h) * (t.wf > 0 ? t.wf : 1);
+    if (nominal > 0) limit = limit > 0 ? Math.min(limit, nominal) : nominal;
+  }
+  return limit;
 }
 function fontFor(doc, styleName) {
   const st = doc.styles.get((styleName || 'STANDARD').toUpperCase());
