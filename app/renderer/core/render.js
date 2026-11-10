@@ -1,5 +1,5 @@
 // 闪电看图 · Canvas 渲染器
-import { OP, FG, FONT_FAMILIES } from './engine.js';
+import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes } from './engine.js';
 import { fontLib, layoutShx } from './shx.js';
 
 export function buildPath(ops) {
@@ -52,6 +52,39 @@ const OLE_FONTS = '"Noto Sans SC","Microsoft YaHei","SimSun","Noto Sans CJK SC",
 function oleFont(face) { return face && !/[",]/.test(face) ? '"' + face + '",' + OLE_FONTS : OLE_FONTS; }
 const measureCtx = (typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(4, 4) : document.createElement('canvas')).getContext('2d');
 
+function drawBar(ctx, x, y, grade) {
+  const g = barStrokes(grade);
+  ctx.save();
+  ctx.strokeStyle = ctx.fillStyle;
+  ctx.lineWidth = g.lw; ctx.lineCap = 'butt'; ctx.lineJoin = 'miter';
+  ctx.beginPath();
+  for (const v of g.verts) { ctx.moveTo(x + v[0], y + v[1]); ctx.lineTo(x + v[2], y + v[3]); }
+  if (g.bar) { ctx.moveTo(x + g.bar.x0, y + g.bar.y); ctx.lineTo(x + g.bar.x1, y + g.bar.y); }
+  ctx.stroke();
+  ctx.beginPath(); ctx.arc(x + g.cx, y + g.cy, g.r, 0, Math.PI * 2); ctx.stroke();
+  ctx.restore();
+}
+function measureShown(ctx, s) {
+  let w = 0, i = 0;
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xE001 && c <= 0xE004) { w += BAR_ADV; i++; continue; }
+    let j = i + 1;
+    while (j < s.length) { const d = s.charCodeAt(j); if (d >= 0xE001 && d <= 0xE004) break; j++; }
+    w += ctx.measureText(s.slice(i, j)).width; i = j;
+  }
+  return w;
+}
+function drawShown(ctx, s, x, y) {
+  let i = 0;
+  while (i < s.length) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xE001 && c <= 0xE004) { drawBar(ctx, x, y, c - 0xE000); x += BAR_ADV; i++; continue; }
+    let j = i + 1;
+    while (j < s.length) { const d = s.charCodeAt(j); if (d >= 0xE001 && d <= 0xE004) break; j++; }
+    const part = s.slice(i, j); ctx.fillText(part, x, y); x += ctx.measureText(part).width; i = j;
+  }
+}
 
 export class Renderer {
   constructor() { this.bg = 'black'; this.layerOn = new Map(); this.prepared = new WeakMap(); this.highlight = null; this.lineScale = 1; this.showText = true; }
@@ -194,7 +227,8 @@ export class Renderer {
       if ((t.sf || t.bf) && this.strokeShx(ctx, t, M, opt)) continue;
       const fam = (this.ttf && t.ff && this.ttf.get(t.ff)) || FONT_FAMILIES[t.f] || FONT_FAMILIES[0];
       if (curFont !== fam) { ctx.font = '100px ' + fam; curFont = fam; }
-      if (t._w === undefined || t._ff !== fam) { measureCtx.font = '100px ' + fam; t._w = measureCtx.measureText(t.s).width; t._ff = fam; }
+      const shown = t.sg || t.s;
+      if (t._w === undefined || t._ff !== fam) { measureCtx.font = '100px ' + fam; t._w = t.sg ? measureShown(measureCtx, t.sg) : measureCtx.measureText(t.s).width; t._ff = fam; }
       const em = t.h * 1.15, k = em / 100;
       t._wl = t._w * k * t.wf;
       let hx = t.wf * t.mx * k;
@@ -208,7 +242,7 @@ export class Renderer {
       const capPx = 100 / 1.15;
       const gx = t.fit ? 0 : -t._w * (t.ha === 1 ? 0.5 : t.ha === 2 ? 1 : 0);
       const gy = t.va === 3 ? capPx : t.va === 2 ? capPx / 2 : t.va === 1 ? -14 : 0;
-      ctx.fillText(t.s, gx, gy);
+      if (t.sg) drawShown(ctx, shown, gx, gy); else ctx.fillText(t.s, gx, gy);
     }
     ctx.restore();
   }

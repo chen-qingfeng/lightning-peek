@@ -101,12 +101,18 @@ test('外部参照：记录插入矩阵，不展开空块', () => {
   assert.ok(Math.abs(px - 100) < 1e-9 && Math.abs(py - 52) < 1e-9, `${px},${py}`);
 });
 
-import { rebarText } from '../app/renderer/core/engine.js';
-test('rebar codes %%130-%%133 fall back to grade letters when no structural SHX font is present', () => {
+import { rebarText, barStrokes } from '../app/renderer/core/engine.js';
+test('rebar codes %%130-%%133 keep SHX bytes, draw as marks, and search as grade letters', () => {
   const sc = buildScene(parseDxf(['0', 'SECTION', '2', 'ENTITIES', '0', 'TEXT', '8', '0', '10', '0', '20', '0', '40', '3', '1', '4%%13225 %%1308@100', '0', 'ENDSEC', '0', 'EOF'].join('\n')));
   const t = sc.spaces[0].texts[0];
   assert.equal(t.sr, '4\x8425 \x828@100'); // 原始字符保留给 SHX 字体
+  assert.equal(t.sg, '4\uE00325 \uE0018@100');
   assert.equal(t.s, '4C25 A8@100');
   assert.equal(rebarText('\x83\x85'), 'BD');
   assert.equal(rebarText('kN/m\x8c2\x8d，2.5x10\x8c-4'), 'kN/m²，2.5x10⁻⁴');
+  const a = barStrokes(1), b = barStrokes(2), c = barStrokes(3), d = barStrokes(4);
+  assert.equal(a.verts.length, 1); assert.equal(a.bar, null); assert.equal(a.verts[0][3], 0);
+  assert.equal(b.verts.length, 1); assert.equal(b.verts[0][3], -3.5); assert.equal(b.bar.y, -3.5);
+  assert.equal(c.verts.length, 2); assert.equal(d.verts.length, 3);
+  assert.ok(d.verts.every(v => v[3] === -3.5 && v[1] === a.verts[0][1]));
 });

@@ -267,12 +267,13 @@ function applyTextEdits(doc) {
   for (const sp of doc.scene.spaces) {
     sp._txIdx = null;
     for (const t of sp.texts) {
-      t._qb = undefined; t._w = undefined; t.sr = undefined;
+      t._qb = undefined; t._w = undefined;
       if (!t.hd || doc.textEdits[t.hd] === undefined) continue;
-      if (t._orig === undefined) t._orig = t.s;
+      if (t._orig === undefined) { t._orig = t.s; t._origSr = t.sr; t._origSg = t.sg; }
       const lines = String(doc.textEdits[t.hd]).split('\n');
       if (t.mt) { const n = t.ln || 1; t.s = t.li === n - 1 ? lines.slice(t.li).join(' ') : (lines[t.li] ?? ''); }
       else t.s = lines.join(' ');
+      t.sr = undefined; t.sg = undefined; // 改过的文字按普通字画；撤销时从 _origSr / _origSg 恢复符号
       t._w = undefined; t._wl = undefined;
     }
   }
@@ -739,7 +740,7 @@ function applyRec(d, u) {
   if (u.op === 'text') {
     const cur = d.textEdits[u.hd];
     if (u.old === undefined) delete d.textEdits[u.hd]; else d.textEdits[u.hd] = u.old;
-    for (const sp of d.scene.spaces) for (const t of sp.texts) if (t.hd === u.hd && t._orig !== undefined && u.old === undefined) { t.s = t._orig; t._w = undefined; t._wl = undefined; }
+    for (const sp of d.scene.spaces) for (const t of sp.texts) if (t.hd === u.hd && t._orig !== undefined && u.old === undefined) { t.s = t._orig; t.sr = t._origSr; t.sg = t._origSg; t._w = undefined; t._wl = undefined; }
     applyTextEdits(d); return { op: 'text', hd: u.hd, old: cur };
   }
   if (u.op === 'move') { const inv = { op: 'move', item: u.item, old: u.item.pts, oldHoles: u.item.holes }; u.item.pts = u.old; if (u.oldHoles) u.item.holes = u.oldHoles; return inv; }
@@ -1269,7 +1270,15 @@ function textBox(t) {
   const pts = [[0, 0], [w, 0], [w, hh], [0, hh]].map(([u, v]) => [t.x + (u + off) * dx - (v + vb) * dy, t.y + (u + off) * dy + (v + vb) * dx]);
   return [Math.min(...pts.map(q => q[0])), Math.min(...pts.map(q => q[1])), Math.max(...pts.map(q => q[0])), Math.max(...pts.map(q => q[1]))];
 }
-function approxW(t) { let w = 0; for (const ch of t.s) w += /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? t.h : t.h * 0.72; return w * t.wf; }
+function approxW(t) {
+  const s = t.sg || t.s; let w = 0;
+  for (const ch of s) {
+    const c = ch.codePointAt(0);
+    if (c >= 0xE001 && c <= 0xE004) w += t.h * 0.828;
+    else w += /[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? t.h : t.h * 0.72;
+  }
+  return w * t.wf;
+}
 function findText(p) {
   const sp = curSpace(); if (!sp || !sp.texts) return null;
   const I = gridOf(sp, '_txIdx', sp.texts, (t) => t._qb || (t._qb = textBox(t)));

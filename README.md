@@ -104,7 +104,7 @@ Tool shortcuts (default): `1` Length · `2` Polyline · `3` Area · `4` Pick are
 
 Known limitations in v0.1.4:
 
-- A Chinese font is bundled (Noto Sans SC, SIL Open Font License). Drawings stay readable on computers that do not have `hztxt.shx`, `gbcbig.shx` or SimSun. If this computer has an SHX font folder selected under Help, those single-line fonts are used instead and the lettering is closer to CAD.
+- A Chinese font is bundled (Noto Sans SC, SIL Open Font License). Drawings stay readable on computers that do not have `hztxt.shx`, `gbcbig.shx` or SimSun. If this computer has an SHX font folder selected under Help, those single-line fonts are used instead and the lettering is closer to CAD. Steel-bar symbols (`%%130`–`%%133`) are drawn as grade marks when `tssdeng.shx` / `yjkeng.shx` are absent; search still uses the letters A/B/C/D.
 - Custom objects from vertical software (for example TArch walls and doors) are not shown unless the drawing was exported to plain entities (“T3” format). TArch annotation objects are the exception (AutoCAD 2000–2004 DWG): text, multi-line text, elevations, axis labels, drawing names, door/window numbers, leaders, index symbols, arrow notes, tables and dimensions are read from the object data and shown as ordinary text and lines. Walls, columns, stairs and slabs still need the T3 export.
 - Wipeouts, 3D solids, regions and multileaders are not shown. External references are shown when the referenced DWG/DXF is found, but you cannot snap to them. Raster images are shown as an outline only.
 - OLE objects are shown from the preview stored in the drawing. If the drawing has no preview for an object, only its frame is drawn.
