@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { decodeTch, tchPairs, tchMarkup } from '../app/renderer/core/tarch.js';
-import { rejoinSplitChars, parseDxf, buildScene } from '../app/renderer/core/engine.js';
+import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
 
 class W {
   constructor() { this.bits = []; }
@@ -65,6 +65,27 @@ test('MTEXT chunk split inside a GBK character is rejoined', () => {
   const s = new TextDecoder('gbk').decode(fixed);
   assert.ok(s.includes('加\r\n  1\r\n盖'), s);
   assert.equal(rejoinSplitChars(bytes, 'windows-1252'), bytes);
+});
+
+test('2007 MTEXT split inside a UTF-8 character is rejoined', () => {
+  // “不” = e4 b8 8d，第一段在 e4 后被截断
+  const raw = '0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1021\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n0\nMTEXT\n3\n接口' ;
+  const head = new TextEncoder().encode(raw);
+  const mid = new Uint8Array([0xe4]); // 不 的第一个字节
+  const tail = new TextEncoder().encode('\n1\n');
+  const rest = new Uint8Array([0xb8, 0x8d]);
+  const end = new TextEncoder().encode('得采用\n0\nENDSEC\n0\nEOF\n');
+  const bytes = new Uint8Array(head.length + mid.length + tail.length + rest.length + end.length);
+  let p = 0;
+  for (const part of [head, mid, tail, rest, end]) { bytes.set(part, p); p += part.length; }
+  const text = new TextDecoder('utf-8').decode(rejoinUtf8(bytes));
+  // 组码还在两段中间，汉字本身已经接回同一条 MTEXT
+  assert.ok(text.includes('接口\n1\n不得采用'), text);
+  assert.equal(text.includes('\ufffd'), false);
+  const decoded = decodeDxf(bytes).text;
+  const mt = parseDxf(decoded).entities.find(e => e.type === 'MTEXT');
+  const joined = mt.all(3).join('') + mt.raw(1);
+  assert.equal(joined, '接口不得采用');
 });
 
 import { decodeTchAny, tchBuild } from '../app/renderer/core/tarch.js';

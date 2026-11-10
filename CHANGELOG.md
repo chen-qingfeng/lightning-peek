@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.8] – Preview – 2026-11-10
+
+### Fixed
+- Tianzheng and Guobiao fonts are recognized by name. A bigfont whose name contains hz, including gbhzfs.shx, is substituted with hztxt.shx or gbcbig.shx. The matching western fonts gbxwxt.shx and superos.shx use simplex.shx, txt.shx or complex.shx. A Chinese character is no longer drawn with the western shape file.
+- AutoCAD 2007 notes no longer lose a character where LibreDWG split a UTF-8 character across two MTEXT chunks.
+
 ## [0.2.7] – Preview – 2026-11-10
 
 ### Fixed

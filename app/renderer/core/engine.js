@@ -49,8 +49,8 @@ function decodeDxfInner(bytes) {
   const head = new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 200000)));
   // R2007 及以后的图纸、或绝大多数多字节序列合法时，按 UTF-8 容错解码（个别截断字符显示为 �）
   const ver = (head.match(/\$ACADVER\s*\r?\n\s*1\s*\r?\n\s*AC(\d{4})/) || [])[1];
+  if (ver && +ver >= 1021) return new TextDecoder('utf-8').decode(rejoinUtf8(bytes));
   const u = new TextDecoder('utf-8').decode(bytes);
-  if (ver && +ver >= 1021) return u;
   // 文件头声明了非 UTF-8 代码页：以声明为准；没有声明时才按非法字节比例判断
   const declared = /\$DWGCODEPAGE\s*\r?\n\s*3\s*\r?\n\s*(?!UTF)/i.test(head);
   if (!declared) {
@@ -69,6 +69,58 @@ const LEAD = {
   gbk: b => b >= 0x81 && b <= 0xfe, big5: b => b >= 0x81 && b <= 0xfe, 'euc-kr': b => b >= 0x81 && b <= 0xfe,
   shift_jis: b => (b >= 0x81 && b <= 0x9f) || (b >= 0xe0 && b <= 0xfc),
 };
+// 2007 及以后的 MTEXT 是 UTF-8。组码 3 按 250 字节切开时，一个汉字的 3 个字节会拆到两段，
+// 解码就变成连续的 �。把段尾没写完的字节挪到下一段开头。
+export function rejoinUtf8(bytes) {
+  // 按字节切行。不能先解码成字符串：UTF-8 的 0x80–0x9F 经过 windows-1252 再写回会变掉。
+  const lines = [];
+  let start = 0;
+  for (let i = 0; i <= bytes.length; i++) {
+    if (i !== bytes.length && bytes[i] !== 10) continue;
+    let end = i; let cr = false;
+    if (end > start && bytes[end - 1] === 13) { cr = true; end--; }
+    lines.push({ b: bytes.subarray(start, end), cr });
+    start = i + 1;
+  }
+  const code = (ln) => { let s = ''; for (const c of ln.b) s += String.fromCharCode(c); return s.trim(); };
+  const tail = (b) => {
+    const n = b.length; if (!n) return 0;
+    let i = n - 1;
+    while (i > 0 && i > n - 4 && (b[i] & 0xc0) === 0x80) i--;
+    const lead = b[i];
+    let need = 0;
+    if ((lead & 0xe0) === 0xc0) need = 2;
+    else if ((lead & 0xf0) === 0xe0) need = 3;
+    else if ((lead & 0xf8) === 0xf0) need = 4;
+    else return 0;
+    const have = n - i;
+    return have < need ? have : 0;
+  };
+  let changed = false;
+  for (let i = 0; i + 3 < lines.length; i++) {
+    if (code(lines[i]) !== '3') continue;
+    const nc = code(lines[i + 2]); if (nc !== '3' && nc !== '1') continue;
+    const k = tail(lines[i + 1].b);
+    if (k > 0) {
+      const v = lines[i + 1].b, nxt = lines[i + 3].b;
+      lines[i + 1] = { b: v.subarray(0, v.length - k), cr: lines[i + 1].cr };
+      const merged = new Uint8Array(k + nxt.length);
+      merged.set(v.subarray(v.length - k), 0); merged.set(nxt, k);
+      lines[i + 3] = { b: merged, cr: lines[i + 3].cr };
+      changed = true;
+    }
+    i++;
+  }
+  if (!changed) return bytes;
+  let n = 0; for (let i = 0; i < lines.length; i++) n += lines[i].b.length + (lines[i].cr ? 1 : 0) + (i + 1 < lines.length ? 1 : 0);
+  const out = new Uint8Array(n); let p = 0;
+  for (let i = 0; i < lines.length; i++) {
+    out.set(lines[i].b, p); p += lines[i].b.length;
+    if (lines[i].cr) out[p++] = 13;
+    if (i + 1 < lines.length) out[p++] = 10;
+  }
+  return out;
+}
 export function rejoinSplitChars(bytes, enc) {
   const isLead = LEAD[enc]; if (!isLead) return bytes;
   const s = new TextDecoder('latin1').decode(bytes);

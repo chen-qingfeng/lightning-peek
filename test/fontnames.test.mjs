@@ -27,4 +27,8 @@ test('MONOTXT, IDQSTYLE and other unknown SHX use the standard fonts', () => {
   assert.deepEqual(fontCandidates('HZFS.SHX'), ['hzfs.shx', 'hztxt.shx', 'gbcbig.shx']);
   assert.deepEqual(fontCandidates('idqstyle.shx'), ['idqstyle.shx', 'hztxt.shx', 'gbcbig.shx']);
   assert.deepEqual(fontCandidates('unknown.shx'), ['unknown.shx', 'simplex.shx', 'txt.shx', 'complex.shx', 'hztxt.shx', 'gbcbig.shx']);
+  // 天正、国标：gbhzfs 是汉字大字体，gbxwxt、superos 是配套西文
+  assert.deepEqual(fontCandidates('gbhzfs.shx'), ['gbhzfs.shx', 'hztxt.shx', 'gbcbig.shx']);
+  assert.deepEqual(fontCandidates('GBXWXT.SHX'), ['gbxwxt.shx', 'simplex.shx', 'txt.shx', 'complex.shx']);
+  assert.deepEqual(fontCandidates('SUPEROS.SHX'), ['superos.shx', 'simplex.shx', 'txt.shx', 'complex.shx']);
 });
