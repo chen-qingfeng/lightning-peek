@@ -5,7 +5,7 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 ## [0.1.9] – Preview – 2026-11-10
 
 ### Fixed
-- Opening a drawing no longer fails with “memory access out of bounds” when a TArch or OLE object makes LibreDWG touch memory it should not. The plain drawing is converted first. If that extra read still faults, the drawing opens without those objects, and the converter is reloaded before the next file.
+- Opening one drawing no longer makes the next one fail with “memory access out of bounds”. Converting some files (the AutoCAD 2000 TArch drawing among them) leaves the LibreDWG converter’s memory unusable. The plain drawing is copied out first, then the converter is discarded and loaded fresh for the next file.
 
 ## [0.1.8] – Preview – 2026-11-10
 

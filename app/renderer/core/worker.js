@@ -34,11 +34,11 @@ function dwgToDxf(m, bytes) {
       if (wasm) { try { tch = extractTch(m, dwg, hex, ver === 'AC1015' || ver === 'AC1018'); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
     }
     return { bytes: out, warn: err, oles, tch };
-  } catch (e) {
-    if (wasmTrap(e)) wasm = null;
-    throw e;
   } finally {
-    if (dwg && wasm && m.dwg_free) { try { m.dwg_free(dwg); } catch (e) { if (wasmTrap(e)) wasm = null; } }
+    // 写某些图（例如这张 AC1015 天正图）的 DXF 时，LibreDWG 会把 wasm 堆写坏，
+    // 下一张图再读就变成 memory access out of bounds。DXF 已经复制出来，丢掉整个模块。
+    try { if (dwg && m.dwg_free) m.dwg_free(dwg); } catch (e) { /* 模块即将丢弃 */ }
+    wasm = null;
     try { m.FS.unlink(inF); } catch (e) { /* ignore */ }
     try { m.FS.unlink(outF); } catch (e) { /* ignore */ }
   }
