@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.1.4 preview</b> (Windows 10 / 11, 64-bit)</p>
+<p align="center"><b>Current version: v0.1.5 preview</b> (Windows 10 / 11, 64-bit)</p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 
@@ -62,8 +62,8 @@ The full plan — layer classification, drawing checks, natural-language queries
 ## Install and first use
 
 1. From [Releases](https://github.com/chen-qingfeng/lightning-peek/releases), download either:
-   - **Portable** `LightningPeek-0.1.4-portable.exe`: a single file. Double-click to run; nothing is installed. The first start takes about half a minute to unpack, later starts are immediate.
-   - **Installer** `LightningPeek-0.1.4-setup-x64.exe`: installs for the current user (no administrator rights), adds a desktop icon and a Start menu entry, can add Lightning Peek to **Open with** for DWG/DXF, and can be removed from **Settings → Apps**. Your settings and markups are kept in `%APPDATA%\闪电看图`.
+   - **Portable** `LightningPeek-0.1.5-portable.exe`: a single file. Double-click to run; nothing is installed. The first start takes about half a minute to unpack, later starts are immediate.
+   - **Installer** `LightningPeek-0.1.5-setup-x64.exe`: installs for the current user (no administrator rights), adds a desktop icon and a Start menu entry, can add Lightning Peek to **Open with** for DWG/DXF, and can be removed from **Settings → Apps**. Your settings and markups are kept in `%APPDATA%\闪电看图`.
    Settings and markups of both are kept in `%APPDATA%\闪电看图`.
 2. Start Lightning Peek from the desktop icon or the portable exe. A step-by-step user guide (Chinese) is in [docs/user-guide.zh-CN.md](docs/user-guide.zh-CN.md) and under **Help → Open the user guide**.
    Windows SmartScreen may warn that the app is from an unknown publisher, because the preview is not code-signed. Choose **More info → Run anyway** only if you downloaded it from this repository's Releases page.

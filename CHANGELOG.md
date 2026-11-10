@@ -2,7 +2,16 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
-## [0.1.4] – Preview – unreleased
+## [0.1.5] – Preview – 2026-11-10
+
+### Changed
+- Moving the mouse, hovering and the compare marching ants no longer redraw the whole drawing.
+- Area, block, text, circle and box-length picks use a spatial index. Count ignores non-countable nested blocks.
+- Circles are stored as a center and radius, so area is πr² instead of a 720-point outline.
+- The parser keeps the DXF bytes only. Closing a drawing releases its external references.
+- Exported images are capped at about 16 million pixels. Batches outside the view are skipped; construction lines still draw.
+
+## [0.1.4] – Preview – 2026-11-08
 
 ### Added
 - Single-file portable build (`LightningPeek-<version>-portable.exe`): double-click to run, nothing is installed. The first start unpacks the program to `%LOCALAPPDATA%\LightningPeek` (about half a minute); later starts are immediate.
