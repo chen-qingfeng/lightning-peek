@@ -397,13 +397,13 @@ function closeDoc(d) {
   if (state.cur === d) activate(state.docs[Math.min(i, state.docs.length - 1)] || null); else renderTabs();
   if (!state.docs.length) renderRecent();
 }
-function spaces(d) { return d.kind === 'drawing' ? d.scene.spaces.filter(s => s.batches.length || s.texts.length || s.fills.length || s.viewports.length || (s.oles && s.oles.length) || !s.paper) : [d.space]; }
+function spaces(d) { return d.kind === 'drawing' ? d.scene.spaces : [d.space]; }
 function curSpace() { const d = state.cur; if (!d) return null; return d.kind === 'drawing' ? spaces(d)[d.spaceIdx] || spaces(d)[0] : d.space; }
 function modelSpace(d) { return d.scene.spaces.find(s => s.key === '*MODEL_SPACE'); }
 function renderSpaceTabs() {
   const el = $('#spacetabs'); el.innerHTML = '';
   const d = state.cur; if (!d || d.kind !== 'drawing') return;
-  const sps = spaces(d); if (sps.length < 2) return;
+  const sps = spaces(d); if (!sps.length) return;
   sps.forEach((s, i) => {
     const t = document.createElement('div'); t.className = 'stab' + (i === d.spaceIdx ? ' on' : ''); t.textContent = spName(s);
     t.onclick = () => { d.spaceIdx = i; resetToolState(); if (!d.views[i]) zoomExtents(true); renderSpaceTabs(); refreshSide(); redraw(); };

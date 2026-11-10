@@ -2,6 +2,12 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.1] – Preview – 2026-11-10
+
+### Fixed
+- The Model and Layout tabs at the bottom left stay visible. An empty layout was being dropped, and the tab bar itself was hidden whenever only Model remained. Layouts named in the drawing are listed again. A layout with no entities opens as a blank sheet; model-space geometry is unchanged.
+- A coordinate label split on `^J` now uses one character size for the whole label. The height grows so the longest line meets the two endpoints, and the characters keep the font's own spacing. Single-line text is left as it was.
+
 ## [0.2.0] – Preview – 2026-11-10
 
 ### Fixed

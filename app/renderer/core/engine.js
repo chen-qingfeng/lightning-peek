@@ -331,6 +331,20 @@ export function approxWidth(str, h) { // 世界单位宽度估计（未乘宽度
   }
   return w;
 }
+// 画布实际字号是字高的 1.15 倍。Noto Sans SC 的数字宽约 0.535em，空格 0.25em，汉字约 1em。
+// 只用来把 ^J 拆开的整段标注放大到两个端点，不改变其它文字的宽度估计。
+export function drawnWidth(str, h) {
+  const em = 1.15;
+  let w = 0;
+  for (const ch of str) {
+    const c = ch.codePointAt(0);
+    if (c >= 0xE001 && c <= 0xE004) w += h * 0.828;
+    else if (CJK.test(ch)) w += h * em;
+    else if (ch === ' ') w += h * 0.25 * em;
+    else w += h * 0.535 * em;
+  }
+  return w;
+}
 function fontFor(doc, styleName) {
   const st = doc.styles.get((styleName || 'STANDARD').toUpperCase());
   const f = ((st && (st.font + ' ' + st.big)) || '').toLowerCase();
@@ -463,7 +477,7 @@ export function buildScene(doc, opts = {}) {
   const out = [];
   const stats = { entities: 0, skipped: {} };
   for (const sp of [...spaces.values()].sort((a, b) => a.order - b.order)) {
-    if (sp.paper && sp.ents.length === 0) continue;
+    // 布局里暂时没有图元也保留。藏掉空布局后，只剩模型空间，左下角的「模型 / 布局」整条都不画。
     const sink = opts.sinkFactory ? opts.sinkFactory(sp) : new SceneSink();
     const o = sp.paper ? [0, 0] : [ox, oy];
     const root = [1, 0, 0, 1, -o[0], -o[1]];
@@ -942,12 +956,17 @@ function emitText(ctx, r, m, s) {
   const visible = lines.filter(t => t);
   const nat = (ln) => approxWidth(ln, h) * wf;
   const longest = visible.reduce((a, ln) => Math.max(a, nat(ln)), 0);
-  // 换行后仍按「整段标注」的字号。对齐时字高跟着变，避免字又小、间距又被拉满。
-  let hh = h;
-  if (align && longest > 0 && fitW > 0) hh = h * (fitW / longest);
-  const fitBase = (!align && fitW > 0) ? fitW / Math.max(nat(visible.join('')), 1e-9) : (align && longest > 0 ? fitW / longest : 0);
   const n = lines.length;
-  const lh = hh; // ^J 的下一行基线只隔一个字高，不用多行文字的 5/3 行距
+  // ^J 拆开的是同一段标注。字高按画出来的最长一行放大，刚好落到两个端点，字距用字体自己的比例。
+  // 单行的对齐 / 布满不动，避免把其它图纸的文字一起改掉。
+  let hh = h;
+  if (n > 1 && fitW > 0) {
+    const longestD = visible.reduce((a, ln) => Math.max(a, drawnWidth(ln, h) * wf), 0);
+    if (longestD > 0) hh = h * (fitW / longestD);
+  } else if (align && longest > 0 && fitW > 0) hh = h * (fitW / longest);
+  const fitBase = (n > 1 || !(fitW > 0)) ? 0
+    : (!align ? fitW / Math.max(nat(visible[0] || ''), 1e-9) : (longest > 0 ? fitW / longest : 0));
+  const lh = hh; // 下一行基线只隔一个字高，不用多行文字的 5/3 行距
   const mscale = Math.sqrt(Math.abs(det(m)));
   lines.forEach((ln, i) => {
     if (!ln) return;

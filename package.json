@@ -1,7 +1,7 @@
 {
   "name": "lightning-peek",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "An open-source DWG/DXF drawing viewer focused on quick, straightforward viewing.",
   "license": "GPL-3.0-or-later",
   "repository": "github:chen-qingfeng/lightning-peek",

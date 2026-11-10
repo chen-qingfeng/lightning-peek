@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseDxf, buildScene, decodeDxf, OP } from '../app/renderer/core/engine.js';
+import { parseDxf, buildScene, decodeDxf, OP, drawnWidth } from '../app/renderer/core/engine.js';
 import { makeXlsx } from '../app/renderer/core/xlsx.js';
 
 const sample = (n) => fs.readFileSync(new URL('../docs/samples/' + n, import.meta.url));
@@ -117,10 +117,11 @@ test('rebar codes %%130-%%133 keep SHX bytes, draw as marks, and search as grade
   assert.ok(d.verts.every(v => v[3] === -3.5 && v[1] === a.verts[0][1]));
 });
 
-test('caret ^M^J keeps one character size and a one-height line gap', () => {
+test('caret ^M^J grows with the two points and does not stretch each line', () => {
   const dxf = ['0', 'SECTION', '2', 'ENTITIES',
     '0', 'TEXT', '8', '0', '10', '0', '20', '0', '11', '30', '21', '0', '40', '3', '72', '5', '1', 'X=12^M^JY=3',
     '0', 'TEXT', '8', '0', '10', '0', '20', '5', '11', '40', '21', '5', '40', '2', '72', '3', '1', 'AB',
+    '0', 'TEXT', '8', '0', '10', '0', '20', '8', '11', '20', '21', '8', '40', '2.5', '72', '5', '1', 'HELLO',
     '0', 'MTEXT', '8', '0', '10', '0', '20', '10', '40', '2.5', '1', '\\T2;AB',
     '0', 'ENDSEC', '0', 'EOF'].join('\n');
   const texts = buildScene(parseDxf(dxf)).spaces[0].texts;
@@ -128,11 +129,34 @@ test('caret ^M^J keeps one character size and a one-height line gap', () => {
   const y = texts.find(t => t.s === 'Y=3');
   assert.ok(x && y);
   assert.equal(x.para, 'X=12\nY=3');
+  const expectH = 3 * 30 / drawnWidth('X=12', 3);
+  assert.ok(expectH > 3);
+  assert.ok(Math.abs(x.h - expectH) < 1e-6);
+  assert.equal(y.h, x.h);
   assert.ok(Math.abs((x.y - y.y) - x.h) < 1e-6);
-  assert.equal(x.h, 3);
-  assert.ok(y.fit < x.fit && x.fit < 30);
+  assert.equal(x.fit, undefined);
+  assert.equal(y.fit, undefined);
   const aligned = texts.find(t => t.s === 'AB' && t.y === 5);
   assert.ok(aligned.h > 2);
+  const single = texts.find(t => t.s === 'HELLO');
+  assert.equal(single.h, 2.5);
+  assert.ok(Math.abs(single.fit - 20) < 1e-6);
   const m = texts.find(t => t.s === 'AB' && t.mt);
   assert.ok(m && Math.abs(m.wf - 2) < 1e-9);
+});
+
+test('named layouts stay in the scene even when the sheet is empty', () => {
+  const dxf = ['0', 'SECTION', '2', 'TABLES', '0', 'TABLE', '2', 'BLOCK_RECORD',
+    '0', 'BLOCK_RECORD', '5', '1F', '2', '*Model_Space',
+    '0', 'BLOCK_RECORD', '5', '58', '2', '*Paper_Space',
+    '0', 'ENDTAB', '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'ENTITIES',
+    '0', 'LINE', '8', '0', '10', '0', '20', '0', '11', '10', '21', '0',
+    '0', 'ENDSEC',
+    '0', 'SECTION', '2', 'OBJECTS',
+    '0', 'LAYOUT', '100', 'AcDbLayout', '1', 'Model', '71', '0', '330', '1F',
+    '0', 'LAYOUT', '100', 'AcDbLayout', '1', '布局1', '71', '1', '330', '58',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const names = buildScene(parseDxf(dxf)).spaces.map(s => s.name);
+  assert.deepEqual(names, ['模型', '布局1']);
 });
