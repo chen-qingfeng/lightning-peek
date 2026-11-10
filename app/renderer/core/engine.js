@@ -350,6 +350,13 @@ export function drawnWidth(str, h) {
   }
   return w;
 }
+// 多行文字一行的横向比例。advance 是这一行在比例 1 下的宽度，box 是文字框宽度，两者同一单位。
+// hx 可以是负的（镜像）。没有超出文字框时原样返回。
+export function clampRun(hx, advance, box) {
+  if (!(box > 0) || !(advance > 0)) return hx;
+  if (!(Math.abs(hx) * advance > box)) return hx;
+  return (hx < 0 ? -1 : 1) * (box / advance);
+}
 function fontFor(doc, styleName) {
   const st = doc.styles.get((styleName || 'STANDARD').toUpperCase());
   const f = ((st && (st.font + ' ' + st.big)) || '').toLowerCase();
@@ -1028,6 +1035,16 @@ function emitMText(ctx, r, m, s) {
       out.push(cur);
     } else out.push(ln);
   }
+  // 自带字体的汉字比换行时估算的宽（字号按字高的 1.15 倍，汉字却占满整个字号）。
+  // 整段用同一个比例压回文字框，避免满行被压窄、短行又保持原宽。
+  let longest = 0;
+  for (const ln of out) {
+    const str = ln.replace(/\s+$/, '');
+    if (!str) continue;
+    const dw = drawnWidth(str, h) * wfe;
+    if (dw > longest) longest = dw;
+  }
+  const ks = width > 0 && longest > width ? width / longest : 1;
   const lsf = r.f(44, 1) || 1;
   const lh = h * 5 / 3 * lsf;
   const n = out.length;
@@ -1040,7 +1057,7 @@ function emitMText(ctx, r, m, s) {
     if (!str && i !== 0) return;
     if (!str) return;
     const dy = top - h - i * lh;
-    const it = textItem(M, x, y, rot, h, wfe, 0, col, 0, str, font, s, 0, dy); Object.assign(it, styleFace(style)); it.hd = r.s(5); it.mt = 1; it.li = i; it.ln = n; if (ctx.depth) it.blk = 1; if (!ctx.sink._paraDone || ctx.sink._paraDone !== r) { it.para = lines.join('\n'); ctx.sink._paraDone = r; }
+    const it = textItem(M, x, y, rot, h, wfe, 0, col, 0, str, font, s, 0, dy); Object.assign(it, styleFace(style)); it.hd = r.s(5); it.mt = 1; it.li = i; it.ln = n; if (width > 0) { it.bw = width; it.ks = ks; } if (ctx.depth) it.blk = 1; if (!ctx.sink._paraDone || ctx.sink._paraDone !== r) { it.para = lines.join('\n'); ctx.sink._paraDone = r; }
     ctx.sink.text(s, it);
   });
 }

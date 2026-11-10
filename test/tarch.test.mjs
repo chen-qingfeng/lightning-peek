@@ -39,6 +39,7 @@ test('TCH_MTEXT: box top-left, centred in box for code 11, pitch = h(1+lsf)/2', 
   const g = Object.fromEntries(pairs);
   assert.equal(type, 'MTEXT');
   assert.ok(Math.abs(g[10] - 102024.7) < 1e-6); // 101744.7 + 560/2
+  assert.equal(g[41], 560); // 文字框 5.6 × 出图比例 100，不再放宽
   assert.equal(g[71], 2); assert.equal(g[1], 'a\\Pb');
   const sc = buildScene(parseDxf(['0', 'SECTION', '2', 'ENTITIES', '0', 'MTEXT', ...pairs.flatMap(([c, v]) => [String(c), String(v)]), '0', 'ENDSEC', '0', 'EOF'].join('\n')));
   const t = sc.spaces[0].texts;

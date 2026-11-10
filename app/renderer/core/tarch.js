@@ -92,10 +92,10 @@ export function tchPairs(f, text) {
   const W = (f.width || 0) * f.scale;
   const col = f.align >= 10 ? HA[f.align] : 0;
   const c = Math.cos(f.rot), s = Math.sin(f.rot), dx = W * col / 2;
-  // 天正的字比我们估算的窄一些，换行宽度留 10% 余量，避免一格里的字被拆成一字一行
+  // 文字框宽度就是原图设定的栏宽，不再放宽。实际字形更宽时，绘图按这个宽度把整段压回去。
   const body = text.replace(/\r\n|\r|\n/g, '\\P').replace(/(\\P\s*)+$/, '');
   const pairs = [[10, f.x + c * dx], [20, f.y + s * dx], [30, f.z || 0], [40, H], [71, 1 + col], [1, body], [50, f.rot]];
-  if (W > 0) pairs.push([41, W * 1.1]);
+  if (W > 0) pairs.push([41, W]);
   if (f.lsf > 0) pairs.push([44, (1 + f.lsf) / 2 * 3 / 5]); // 引擎的行距 = 字高 × 5/3 × 组码44
   return { type: 'MTEXT', pairs };
 }
@@ -385,7 +385,7 @@ export function tchBuild(f, dec) {
         const xa = xs[c0], xb = xs[c1 + 1], ya = ys[r0], yb = ys[r1 + 1];
         out.push(LN([xa, ya], [xb, ya]), LN([xa, yb], [xb, yb]), LN([xa, ya], [xa, yb]), LN([xb, ya], [xb, yb]));
         const s = raw ? dec(raw).trim() : '';
-        if (s) out.push(MT((xa + xb) / 2, (ya + yb) / 2, 3.5 * sc, 5, Math.max(xb - xa - 0.8 * sc, sc) * 1.1, s, 0.72));
+        if (s) out.push(MT((xa + xb) / 2, (ya + yb) / 2, 3.5 * sc, 5, Math.max(xb - xa - 0.8 * sc, sc), s, 0.72));
       }
       return out;
     }

@@ -1,5 +1,5 @@
 // 闪电看图 · Canvas 渲染器
-import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes } from './engine.js';
+import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes, clampRun } from './engine.js';
 import { fontLib, layoutShx } from './shx.js';
 
 export function buildPath(ops) {
@@ -233,6 +233,11 @@ export class Renderer {
       t._wl = t._w * k * t.wf;
       let hx = (t.wf > 0 ? t.wf : 1) * t.mx * k;
       if (t.fit) hx = t.fit / t._w * t.mx;
+      else {
+        // ks 按整段最长一行计算，短行用同一个比例，字宽才一致。再按实测宽度兜底，不超出文字框。
+        if (t.ks > 0 && t.ks < 1) hx *= t.ks;
+        hx = clampRun(hx, t._w, t.bw);
+      }
       const tanO = Math.tan(t.obl || 0);
       // 字形坐标 (gx, gy↓) → 局部：U*hx*gx + (−V*k*my − U*hx*tanO)*gy
       const ax = t.ux * hx, ay = t.uy * hx;
@@ -255,6 +260,7 @@ export class Renderer {
     let sx = (t.h / lay.up) * (t.wf || 1) * mx;
     const sy = (t.h / lay.up) * my;
     if (t.fit) sx = t.fit / lay.width * mx;
+    else sx = clampRun(sx, lay.width, t.bw);
     const ox = t.fit ? 0 : t.ha === 1 ? -lay.width / 2 : t.ha === 2 ? -lay.width : 0;
     const oy = t.va === 1 ? lay.down : t.va === 2 ? -(lay.up - lay.down) / 2 : t.va === 3 ? -lay.up : 0;
     const tan = Math.tan(t.obl || 0);

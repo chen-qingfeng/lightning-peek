@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseDxf, buildScene, decodeDxf, OP, drawnWidth, layoutTitle } from '../app/renderer/core/engine.js';
+import { parseDxf, buildScene, decodeDxf, OP, drawnWidth, layoutTitle, clampRun } from '../app/renderer/core/engine.js';
 import { makeXlsx } from '../app/renderer/core/xlsx.js';
 
 const sample = (n) => fs.readFileSync(new URL('../docs/samples/' + n, import.meta.url));
@@ -163,4 +163,24 @@ test('named layouts stay in the scene even when the sheet is empty', () => {
   assert.deepEqual(buildScene(parseDxf(en)).spaces.map(s => s.name), ['模型', '布局1']);
   assert.equal(layoutTitle('Layout2'), '布局2');
   assert.equal(layoutTitle('封面'), '封面');
+});
+
+test('a multiline note is squeezed back inside its column, short lines included', () => {
+  const s = '一二三四五六七八九十'.repeat(8);
+  const dxf = ['0', 'SECTION', '2', 'ENTITIES', '0', 'MTEXT', '8', '0', '10', '0', '20', '0', '40', '10', '41', '100', '1', s, '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const texts = buildScene(parseDxf(dxf)).spaces[0].texts;
+  assert.ok(texts.length > 1);
+  const ks = texts[0].ks;
+  assert.ok(ks > 0 && ks < 1);
+  for (const t of texts) {
+    assert.equal(t.bw, 100);
+    assert.equal(t.ks, ks);
+    assert.ok(drawnWidth(t.s, t.h) * t.wf * t.ks <= 100 + 1e-6);
+  }
+  const short = ['0', 'SECTION', '2', 'ENTITIES', '0', 'MTEXT', '8', '0', '10', '0', '20', '0', '40', '10', '41', '100', '1', '甲', '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const one = buildScene(parseDxf(short)).spaces[0].texts[0];
+  assert.equal(one.ks, 1);
+  assert.equal(clampRun(1.15, 100, 100), 1);
+  assert.equal(clampRun(-2, 80, 100), -1.25);
+  assert.equal(clampRun(0.5, 10, 0), 0.5);
 });

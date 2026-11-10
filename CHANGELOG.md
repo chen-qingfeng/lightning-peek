@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.6] – Preview – 2026-11-10
+
+### Fixed
+- Multiline notes stay inside the column width set on the drawing. A built-in font that is wider than the single-line font no longer runs into the next column or the table beside it. Every line of the same note uses one width, so a short line is not left wider than the lines above it.
+
 ## [0.2.5] – Preview – 2026-11-10
 
 ### Fixed
