@@ -305,6 +305,8 @@ export function cleanText(s) {
   s = s.replace(/\\M\+[0-9A-Fa-f]([0-9A-Fa-f]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
   s = s.replace(/%%[cC]/g, 'Ø').replace(/%%[dD]/g, '°').replace(/%%[pP]/g, '±').replace(/%%[uUoOkK]/g, '').replace(/%%%/g, '%')
     .replace(/%%(\d{3})/g, (_, d) => String.fromCharCode(+d));
+  // 管立得等软件在坐标、管线标注里用 ^M^J 换行。留下这两个字符，X 和 Y 会粘在一行并多出 ^M。
+  s = s.replace(/\^M\^J|\^J\^M|\^M|\^J/g, '\n').replace(/\r\n|\r/g, '\n');
   return s;
 }
 function mtextLines(raw) {
@@ -915,12 +917,14 @@ function emitInsert(ctx, r, m, inh, attribs) {
 }
 
 function emitText(ctx, r, m, s) {
-  const str = cleanText(r.raw(1)).replace(/\s+$/, '');
-  if (!str) return;
+  const lines = cleanText(r.raw(1)).replace(/\s+$/, '').split('\n').map(t => t.replace(/\s+$/, ''));
+  while (lines.length > 1 && !lines[lines.length - 1]) lines.pop();
+  if (!lines.some(t => t)) return;
   const doc = ctx.doc;
   const style = doc.styles.get(r.s(7, 'STANDARD').toUpperCase());
   const h = r.f(40, style && style.h ? style.h : 2.5);
-  const wf = r.has(41) ? r.f(41, 1) : (style ? style.wf : 1);
+  const wfRaw = r.has(41) ? r.f(41, 1) : (style ? style.wf : 1);
+  const wf = wfRaw > 0 ? wfRaw : 1; // 0 不是合法宽度，按默认 1，否则所有字叠在同一个点上
   const obl = (r.has(51) ? r.f(51) : (style ? style.obl : 0)) * Math.PI / 180;
   let ha = r.i(72, 0), va = r.i(73, 0);
   if (r.type === 'ATTRIB') va = r.i(74, va);
@@ -934,11 +938,19 @@ function emitText(ctx, r, m, s) {
     fitW = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
     anchor = p1; ha = 0; va = 0;
   } else if (ha === 4) { ha = 1; va = 2; }
-  const item = textItem(m, anchor[0], anchor[1], rot, h, wf, obl, ha, va, str, fontFor(doc, r.s(7)), s, gen);
-  Object.assign(item, styleFace(style));
-  item.hd = r.s(5); if (ctx.depth) item.blk = 1;
-  if (fitW > 0) item.fit = fitW * Math.sqrt(Math.abs(det(m)));
-  ctx.sink.text(s, item);
+  const n = lines.length;
+  const lh = h * 5 / 3;
+  const fit = fitW > 0 ? fitW * Math.sqrt(Math.abs(det(m))) : 0;
+  lines.forEach((ln, i) => {
+    if (!ln) return;
+    // 每一行单独布满两点之间，字距才能散开；整段粘在一起时会被挤到同一段长度里
+    const item = textItem(m, anchor[0], anchor[1], rot, h, wf, obl, ha, va, ln, fontFor(doc, r.s(7)), s, gen, -i * lh);
+    Object.assign(item, styleFace(style));
+    item.hd = r.s(5); if (ctx.depth) item.blk = 1;
+    if (n > 1) { item.mt = 1; item.li = i; item.ln = n; if (i === 0) item.para = lines.join('\n'); }
+    if (fit > 0) item.fit = fit;
+    ctx.sink.text(s, item);
+  });
 }
 
 function textItem(m, x, y, rot, h, wf, obl, ha, va, str, font, s, gen = 0, dy = 0) {
@@ -967,7 +979,11 @@ function emitMText(ctx, r, m, s) {
   const wf = style ? style.wf : 1;
   const font = fontFor(doc, r.s(7));
   // \W 宽度因子（取第一个）
-  const mw = raw.match(/\\W([\d.]+);/); const wfe = mw ? parseFloat(mw[1]) || wf : wf;
+  const mw = raw.match(/\\W([\d.]+);/);
+  const wbase = mw && parseFloat(mw[1]) > 0 ? parseFloat(mw[1]) : (wf > 0 ? wf : 1);
+  const mt = raw.match(/\\T([\d.]+);/); // 字符间距。丢掉它时，本该散开的字会挤在一起
+  const trk = mt && parseFloat(mt[1]) > 0 ? parseFloat(mt[1]) : 1;
+  const wfe = wbase * trk;
   // 自动换行
   const out = [];
   for (const ln of lines) {

@@ -78,6 +78,15 @@ test('the bundled Chinese font is part of every fallback stack', () => {
   assert.match(notice, /SIL OPEN FONT LICENSE/);
 });
 
+test('bigfont subshapes advance instead of stacking', () => {
+  // 子形 3：提笔走到 x=10。一个字引用它两次，总宽应是 20，而不是叠在原点。
+  const font = parseShx(bigFont([[3, [2, 8, 10, 0, 0]], [0xd6d0, [7, 3, 7, 3, 0]]]));
+  const ch = new TextDecoder('gbk').decode(new Uint8Array([0xd6, 0xd0]));
+  const lay = layoutShx(ch, null, font);
+  assert.ok(lay);
+  assert.equal(lay.width, 20);
+});
+
 test('missing SHX data falls back instead of drawing an empty word', () => {
   const font = parseShx(shapesFont([[65, [8, 6, 0, 0]]]));
   assert.equal(layoutShx('消防', font, null), null);

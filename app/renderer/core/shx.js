@@ -305,7 +305,8 @@ function interpret(font, data, stack) {
           } else {
             const sub = nativeGlyph(font, n, stack);
             drawSub(sub, x, y, scale, scale);
-            if (n === 2 && sub && sub.endX * scale > x) x = sub.endX * scale;
+            // 子形画完后笔要停在它的终点。不前进的话，一个字的各部分会叠在同一个点上。
+            if (sub) { x += sub.endX * scale; y += sub.endY * scale; mark(x, y); }
           }
         }
         if (pen) cur = [x, y];
@@ -461,7 +462,8 @@ export function layoutShx(str, primary, big) {
       for (let k = 0; k < pl.length; k += 2) { out[k] = x + pl[k]; out[k + 1] = pl[k + 1]; }
       lines.push(out);
     }
-    x += g.adv > 0 ? g.adv : up * 0.5;
+    const step = Math.max(g.adv, g.maxX);
+    x += step > 0 ? step : up * 0.5;
   }
   if (!hit || miss > hit) return null;
   return { lines, width: x, up, down };

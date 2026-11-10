@@ -231,7 +231,7 @@ export class Renderer {
       if (t._w === undefined || t._ff !== fam) { measureCtx.font = '100px ' + fam; t._w = t.sg ? measureShown(measureCtx, t.sg) : measureCtx.measureText(t.s).width; t._ff = fam; }
       const em = t.h * 1.15, k = em / 100;
       t._wl = t._w * k * t.wf;
-      let hx = t.wf * t.mx * k;
+      let hx = (t.wf > 0 ? t.wf : 1) * t.mx * k;
       if (t.fit) hx = t.fit / t._w * t.mx;
       const tanO = Math.tan(t.obl || 0);
       // 字形坐标 (gx, gy↓) → 局部：U*hx*gx + (−V*k*my − U*hx*tanO)*gy
@@ -263,9 +263,10 @@ export class Renderer {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.beginPath();
     ctx.strokeStyle = this.colorOf(t.color, opt.color);
-    ctx.lineWidth = Math.max((opt.dpr || 1), hpx * 0.045);
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
+    // 单线字用细线。以前线宽随字高变粗，再加圆角，汉字会糊成一团。
+    ctx.lineWidth = Math.max(1, Math.min((opt.dpr || 1) * 1.05, hpx * 0.045));
+    ctx.lineJoin = 'bevel';
+    ctx.lineCap = 'butt';
     for (const pl of lay.lines) {
       for (let i = 0; i < pl.length; i += 2) {
         const gx = pl[i] + ox + (pl[i + 1] + oy) * tan;

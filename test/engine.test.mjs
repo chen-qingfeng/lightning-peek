@@ -116,3 +116,21 @@ test('rebar codes %%130-%%133 keep SHX bytes, draw as marks, and search as grade
   assert.equal(c.verts.length, 2); assert.equal(d.verts.length, 3);
   assert.ok(d.verts.every(v => v[3] === -3.5 && v[1] === a.verts[0][1]));
 });
+
+test('caret ^M^J splits a coordinate onto two lines that each keep the fitted width', () => {
+  const dxf = ['0', 'SECTION', '2', 'ENTITIES',
+    '0', 'TEXT', '8', '0', '10', '0', '20', '0', '11', '30', '21', '0', '40', '3', '72', '5', '1', 'X=1^M^JY=2',
+    '0', 'MTEXT', '8', '0', '10', '0', '20', '10', '40', '2.5', '1', '\\T2;AB',
+    '0', 'ENDSEC', '0', 'EOF'].join('\n');
+  const texts = buildScene(parseDxf(dxf)).spaces[0].texts;
+  const x = texts.find(t => t.s === 'X=1');
+  const y = texts.find(t => t.s === 'Y=2');
+  assert.ok(x && y);
+  assert.equal(x.para, 'X=1\nY=2');
+  assert.ok(y.y < x.y);
+  assert.equal(x.fit, 30);
+  assert.equal(y.fit, 30);
+  const m = texts.find(t => t.s === 'AB');
+  assert.ok(m);
+  assert.ok(Math.abs(m.wf - 2) < 1e-9);
+});

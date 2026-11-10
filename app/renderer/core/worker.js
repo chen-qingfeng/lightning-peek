@@ -309,7 +309,7 @@ function applyEdits(text, edits) {
           for (let k = 0; k + 1 < rec.length; k += 2) { const cc = rec[k].trim(); if (cc === '3') continue; if (cc === '1' && !put) { rec2.push(rec[k], body); put = true; continue; } rec2.push(rec[k], rec[k + 1]); }
           out.push(...rec2);
         } else {
-          let put = false; for (let k = 0; k + 1 < rec.length; k += 2) { if (rec[k].trim() === '1' && !put) { out.push(rec[k], nv.replace(/\r?\n/g, ' ')); put = true; } else out.push(rec[k], rec[k + 1]); }
+          let put = false; for (let k = 0; k + 1 < rec.length; k += 2) { if (rec[k].trim() === '1' && !put) { out.push(rec[k], nv.replace(/\r?\n/g, '^J')); put = true; } else out.push(rec[k], rec[k + 1]); }
         }
       } else out.push(...rec);
       i = j; continue;

@@ -2,6 +2,14 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.1.10] – Preview – 2026-11-10
+
+### Fixed
+- Coordinate and pipe labels that store a line break as `^M^J` (管立得 and similar CAD) no longer show those caret codes between the X and the Y. The label breaks onto two lines, and each line keeps the fitted width so the characters spread out instead of piling up.
+- An imported SHX font is drawn with a hairline. The old stroke grew with the text height and used round corners, so Chinese characters turned into a thick blur.
+- A bigfont character built from several subshapes advances the pen after each part, so the parts are no longer drawn on top of each other.
+- MTEXT character spacing (`\T`) is applied. A width factor of 0 is treated as 1, which is the DXF default, so the text does not collapse onto one point.
+
 ## [0.1.9] – Preview – 2026-11-10
 
 ### Fixed
