@@ -43,6 +43,12 @@ test('shapes SHX draws a glyph and reports its advance', () => {
   assert.deepEqual(lay.lines[0].slice(0, 4), [0, 0, 0, 8]);
 });
 
+test('a shapes font that drops a Chinese character gives the line back to the system font', () => {
+  const font = parseShx(shapesFont([[65, [8, 0, 8, 8, 6, 0, 2, 8, 2, -8 & 255, 0]]]));
+  assert.equal(layoutShx('AAAA中', font, null), null);
+  assert.ok(layoutShx('AA', font, null));
+});
+
 test('bigfont SHX is looked up by GBK code', () => {
   const dec = new TextDecoder('gbk');
   const ch = dec.decode(new Uint8Array([0xd6, 0xd0]));

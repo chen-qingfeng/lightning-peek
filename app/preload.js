@@ -6,7 +6,7 @@ const queued = [];
 ipcRenderer.on('open-file', (e, p) => { if (openCb) openCb(p); else queued.push(p); });
 
 contextBridge.exposeInMainWorld('sdkt', {
-  version: '0.2.3',
+  version: '0.2.4',
   openDialog: (opt) => ipcRenderer.invoke('open-dialog', opt || {}),
   readFile: (p) => ipcRenderer.invoke('read-file', p),
   readText: (p) => ipcRenderer.invoke('read-text', p),

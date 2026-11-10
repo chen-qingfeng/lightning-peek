@@ -439,7 +439,9 @@ function pick(ch, shapes, big) {
   return null;
 }
 
-// 返回字体单位下的折线（y 向上，基线为 0）。一个字都没有时返回 null，调用方改用系统字体。
+const CJK = /[⺀-鿿豈-﫿]/;
+// 返回字体单位下的折线（y 向上，基线为 0）。一个字都没有，或缺了汉字时返回 null，调用方改用系统字体。
+// 汉字只比西文少一个时不能留在单线字里，否则说明文字会丢掉整段中文。
 export function layoutShx(str, primary, big) {
   let shapes = primary && primary.type !== 'bigfont' ? primary : null;
   if (primary && primary.type === 'bigfont') big = big || primary;
@@ -447,13 +449,14 @@ export function layoutShx(str, primary, big) {
   const up = (big && big.baseUp) || (shapes && shapes.baseUp) || 8;
   const down = (big && big.baseDown) || (shapes && shapes.baseDown) || 0;
   const lines = [];
-  let x = 0, hit = 0, miss = 0;
+  let x = 0, hit = 0, miss = 0, cjkMiss = false;
   for (const ch of str) {
     if (ch === ' ' || ch === '\t') { x += up * 0.5; continue; }
     const g = pick(ch, shapes, big);
     if (!g) {
       miss++;
-      x += /[⺀-鿿豈-﫿]/.test(ch) ? up : up * 0.5;
+      if (CJK.test(ch)) cjkMiss = true;
+      x += CJK.test(ch) ? up : up * 0.5;
       continue;
     }
     hit++;
@@ -465,6 +468,6 @@ export function layoutShx(str, primary, big) {
     const step = Math.max(g.adv, g.maxX);
     x += step > 0 ? step : up * 0.5;
   }
-  if (!hit || miss > hit) return null;
+  if (!hit || cjkMiss || miss > hit) return null;
   return { lines, width: x, up, down };
 }

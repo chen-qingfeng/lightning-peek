@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.4] – Preview – 2026-11-10
+
+### Fixed
+- Text styles such as MONOTXT and IDQSTYLE (gbenor.shx with hzfs.shx) no longer drop the Chinese on a line that also contains letters. A missing bigfont is substituted with hztxt.shx or gbcbig.shx, and monotxt.shx or gbenor.shx with simplex.shx, txt.shx or complex.shx. Any other unrecognized SHX uses that same standard set. If a Chinese character is still missing, the whole line is drawn with the built-in font.
+
 ## [0.2.3] – Preview – 2026-11-10
 
 ### Changed

@@ -19,5 +19,12 @@ test('missing western shx falls back to simplex, txt, complex', () => {
 test('simsun.ttf resolves to the Windows ttc name', () => {
   assert.deepEqual(fontCandidates('simsun.ttf'), ['simsun.ttf', 'simsun.ttc']);
   assert.deepEqual(fontCandidates('C:\\\\Windows\\\\Fonts\\\\simhei.ttf'), ['simhei.ttf']);
-  assert.deepEqual(fontCandidates('unknown.shx'), ['unknown.shx']);
+});
+
+test('MONOTXT, IDQSTYLE and other unknown SHX use the standard fonts', () => {
+  assert.deepEqual(fontCandidates('monotxt.shx'), ['monotxt.shx', 'simplex.shx', 'txt.shx', 'complex.shx']);
+  assert.deepEqual(fontCandidates('gbenor.shx'), ['gbenor.shx', 'simplex.shx', 'txt.shx', 'complex.shx']);
+  assert.deepEqual(fontCandidates('HZFS.SHX'), ['hzfs.shx', 'hztxt.shx', 'gbcbig.shx']);
+  assert.deepEqual(fontCandidates('idqstyle.shx'), ['idqstyle.shx', 'hztxt.shx', 'gbcbig.shx']);
+  assert.deepEqual(fontCandidates('unknown.shx'), ['unknown.shx', 'simplex.shx', 'txt.shx', 'complex.shx', 'hztxt.shx', 'gbcbig.shx']);
 });
