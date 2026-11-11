@@ -2,6 +2,33 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.21] – Preview – 2026-11-12
+
+### Fixed
+- Opening a third or fourth DWG no longer hangs on "Converting DWG" or fails. Each DWG is now converted in its own short-lived reader thread that is closed as soon as the file is read, so its memory (at least 1 GB per file) is returned at once. Before, old readers piled up until there was no memory left.
+- A conversion that runs longer than five minutes stops with a message instead of blocking every drawing opened after it. A reader that crashes is retried once in a fresh thread.
+- Error messages follow the real LibreDWG error. Before, any file the reader could not make sense of, for example a valid drawing read after memory ran out, could be reported as "drawing version too new". Now the message names the file's version and says whether the file looks damaged, is not a DWG, or memory ran out.
+
+## [0.2.20] – Preview – 2026-11-11
+
+### Fixed
+- Several DWG files opened at once, for example from Explorer or while external references load, are read one after another. Each one gets a fresh reader, so the second file no longer fails with a memory error.
+- Save as DXF or DWG counts the Tianzheng objects and embedded tables that the saved file cannot hold, and the message names them. Before, the count left them out and said nothing was dropped.
+- On AutoCAD 2007 drawings, Tianzheng elevations, axis labels, opening tags, index symbols, tables and dimensions that are not read are listed as not shown. They no longer disappear without a note.
+- Polylines with start and end widths, such as PLINE arrows and multileader arrowheads, are filled to their width instead of drawn as a thin line.
+- The one-step smaller display height stays proportional below 2: 1 draws as 0.75, not 0.5. 3.5, 3 and 2 still draw as 3, 2.5 and 1.5.
+- An attribute's vertical alignment is read from its own field. The field length is no longer taken as the alignment.
+- The app page can no longer change the converter path or the font folders through settings, and it reads only the notes file next to a drawing or a file chosen in the import dialog.
+- Text drawn with an SHX font shows the diameter, degree and plus-minus signs. Before, %%c100 showed as 100.
+- \M+ escaped text in older drawings is decoded in its code page, so Chinese characters no longer turn into Korean syllables.
+- SHX text keeps its line layout between frames, so drawings with a lot of single-line text pan and zoom faster.
+- Layout to model writes diameter, degree, plus-minus and rebar symbols as CAD codes instead of question marks.
+- Wide polylines end flat at their end points, as in CAD, instead of extending by half their width.
+- SHX fractional arcs with a radius above 255 use the right radius.
+- Exported search results get a valid file name even when the search text has characters such as / or ?.
+- Opening the same drawing twice in quick succession opens one tab.
+- Line types that start with a gap or have an odd number of segments draw their dashes in the right places.
+
 ## [0.2.19] – Preview – 2026-11-11
 
 ### Fixed

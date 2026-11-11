@@ -173,8 +173,14 @@ function num(x) {
   return s === '-0' ? '0' : s;
 }
 const BAD_NAME = /[<>/\\":;?*|=`,\u0000-\u001f]/g;
+// 显示用的符号写回 CAD 的控制码：GBK 里没有 Ø、上下标，直接编码会变成「?」。
+const SUPS = '⁰¹²³⁴⁵⁶⁷⁸⁹', SUBS = '₀₁₂₃₄₅₆₇₈₉';
 function txt(s) {
-  return String(s).replace(/[\r\n\t]+/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '').replace(/%%/g, '%%%%%%');
+  return String(s).replace(/[\r\n\t]+/g, ' ').replace(/%%/g, '%%%%%%')
+    .replace(/[\u00d8\u2300]/g, '%%c').replace(/\u00b0/g, '%%d').replace(/\u00b1/g, '%%p')
+    .replace(/[\x82-\x85\x8c-\x8f]/g, c => '%%' + c.charCodeAt(0)) // 结构钢筋符号、上下标标记（原始 %%130–%%143）
+    .replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/g, c => { const i = SUPS.indexOf(c); return String(i >= 0 ? i : SUBS.indexOf(c)); })
+    .replace(/[\u0000-\u001f\u007f]/g, '');
 }
 
 // ---------- DXF 写出器 ----------
@@ -202,7 +208,7 @@ class Writer {
     return L;
   }
   ltype(d, s) {
-    const v = d.map(x => Math.abs(x) * s);
+    const v = d.map(x => x * s); // 正数画、负数空，原样写回
     const k = v.map(x => x.toPrecision(6)).join(',');
     let t = this.ltypes.get(k);
     if (!t) { t = { name: 'LP' + (this.ltypes.size + 1), d: v }; this.ltypes.set(k, t); }
@@ -253,7 +259,7 @@ class Writer {
     if (Ux * Vy - Uy * Vx < 0) my = !my; // 镜像变换：等价于上下颠倒
     const h = t.h * lv, rot = Math.atan2(Uy, Ux);
     this.head('TEXT', t);
-    this.p('10', num(x), '20', num(y), '30', '0', '40', num(h), '1', txt(t.s));
+    this.p('10', num(x), '20', num(y), '30', '0', '40', num(h), '1', txt(t.sr || t.s)); // sr 是钢筋符号的原始写法
     let deg = rot * 180 / Math.PI % 360; if (deg < 0) deg += 360;
     if (Math.abs(deg) > 1e-9) this.p('50', num(deg));
     const wf = (t.wf || 1) * lu / lv;
@@ -290,8 +296,8 @@ class Writer {
     H.push('0', 'TABLE', '2', 'LTYPE', '70', String(this.ltypes.size + 1),
       '0', 'LTYPE', '2', 'CONTINUOUS', '70', '0', '3', 'Solid line', '72', '65', '73', '0', '40', '0');
     for (const t of this.ltypes.values()) {
-      H.push('0', 'LTYPE', '2', t.name, '70', '0', '3', '', '72', '65', '73', String(t.d.length), '40', num(t.d.reduce((a, x) => a + x, 0)));
-      t.d.forEach((x, i) => H.push('49', num(i % 2 ? -x : x)));
+      H.push('0', 'LTYPE', '2', t.name, '70', '0', '3', '', '72', '65', '73', String(t.d.length), '40', num(t.d.reduce((a, x) => a + Math.abs(x), 0)));
+      t.d.forEach((x) => H.push('49', num(x)));
     }
     H.push('0', 'ENDTAB');
     H.push('0', 'TABLE', '2', 'LAYER', '70', String(this.layers.size));

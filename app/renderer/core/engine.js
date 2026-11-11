@@ -616,11 +616,34 @@ function dashFor(ctx, st, m) {
   const lt = ctx.doc.ltypes.get(st.ltype);
   if (!lt || lt.dashes.length < 2) return null;
   const sc = ctx.ltscale * (st.lts || 1) * Math.sqrt(Math.abs(det(m))) ;
-  const d = lt.dashes.map(x => Math.max(Math.abs(x) * sc, 0)).map((x, i) => (x === 0 ? sc * 0.05 : x));
-  if (d.reduce((a, b) => a + b, 0) <= 0) return null;
+  // 保留正负：正数是画的段，负数是空白，0 是点（画一小段）。转成画布的线段/空白交替由渲染器做。
+  const d = lt.dashes.map(x => (x === 0 ? sc * 0.05 : x * sc));
+  if (!d.some(x => x > 0) || d.reduce((a, b) => a + Math.abs(b), 0) <= 0) return null;
   return d;
 }
 
+// 线型（正数画、负数空）→ 画布的「画、空」交替数组和起始偏移。
+// 相邻同号的段合并；以空白开头的线型从第一段画线开始排，再用偏移把开头的空白补回来。
+export function canvasDash(signed) {
+  const runs = [];
+  for (const x of signed) {
+    const on = x > 0, len = Math.abs(x);
+    if (runs.length && runs[runs.length - 1].on === on) runs[runs.length - 1].len += len;
+    else runs.push({ on, len });
+  }
+  let lead = 0;
+  while (runs.length && !runs[0].on) { const r = runs.shift(); lead += r.len; runs.push(r); }
+  // 首尾同号（都是画）时合并成一段，保持偶数长度
+  if (runs.length > 1 && runs[runs.length - 1].on === runs[0].on) { const r = runs.pop(); runs[0].len += r.len; lead -= r.len; }
+  // 合并后可能还剩连续同号（例如末尾的空白挪到后面后和原来末尾的空白相邻）
+  const merged = [];
+  for (const r of runs) { if (merged.length && merged[merged.length - 1].on === r.on) merged[merged.length - 1].len += r.len; else merged.push({ ...r }); }
+  if (merged.length === 1) return { dash: [], offset: 0 }; // 只有画的段：实线
+  const dash = merged.map(r => r.len);
+  const total = dash.reduce((a, b) => a + b, 0);
+  const offset = lead > 0 ? total - lead : -lead;
+  return { dash, offset: ((offset % total) + total) % total };
+}
 function walk(ctx, ents, m, inh) {
   for (let i = 0; i < ents.length; i++) {
     const r = ents[i];
@@ -780,14 +803,16 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       const verts = []; let cur = null;
       for (let j = 0; j < r.c.length; j++) {
         const c = r.c[j];
-        if (c === 10) { cur = [parseFloat(r.v[j]), 0, 0]; verts.push(cur); }
+        if (c === 10) { cur = [parseFloat(r.v[j]), 0, 0, 0, 0]; verts.push(cur); }
         else if (c === 20 && cur) cur[1] = parseFloat(r.v[j]);
         else if (c === 42 && cur) cur[2] = parseFloat(r.v[j]);
+        else if (c === 40 && cur) cur[3] = parseFloat(r.v[j]) || 0;
+        else if (c === 41 && cur) cur[4] = parseFloat(r.v[j]) || 0;
       }
       const closed = (r.i(70) & 1) !== 0;
       const { ops, flat, vi } = polyOps(M, verts, closed);
       const w = r.f(43, 0) || (r.has(40) ? r.f(40) : 0);
-      S.path(s, ops, dashFor(ctx, s, M), w * Math.sqrt(Math.abs(det(M))), t);
+      if (r.has(43) || !taperedPoly(S, s, M, verts, closed, t)) S.path(s, ops, dashFor(ctx, s, M), w * Math.sqrt(Math.abs(det(M))), t);
       polySnaps(S, M, verts, flat, closed);
       if (closed && flat.length > 2) S.region(flat);
       S.curve(s.layer, polyLength(verts, closed) * Math.sqrt(Math.abs(det(M))), flat, vi, 'pline');
@@ -798,7 +823,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       const verts = []; let j = idx + 1;
       for (; j < ents.length; j++) {
         const v = ents[j];
-        if (v.type === 'VERTEX') { const vf = v.i(70); if (vf & 16) continue; if (!(vf & 128) || (vf & 64)) verts.push([v.f(10), v.f(20), v.f(42)]); }
+        if (v.type === 'VERTEX') { const vf = v.i(70); if (vf & 16) continue; if (!(vf & 128) || (vf & 64)) verts.push([v.f(10), v.f(20), v.f(42), v.f(40, r.f(40, 0)), v.f(41, r.f(41, 0))]); }
         else break;
       }
       const consumed = j - idx - (ents[j] && ents[j].type === 'SEQEND' ? 0 : 1);
@@ -811,7 +836,7 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
       const M = (flags & 8) ? m : om(); const s = st();
       const closed = (flags & 1) !== 0;
       const { ops, flat, vi } = polyOps(M, verts, closed);
-      S.path(s, ops, dashFor(ctx, s, M), r.f(40, 0) * Math.sqrt(Math.abs(det(M))), t);
+      if (!taperedPoly(S, s, M, verts, closed, t)) S.path(s, ops, dashFor(ctx, s, M), r.f(40, 0) * Math.sqrt(Math.abs(det(M))), t);
       polySnaps(S, M, verts, flat, closed);
       if (closed && flat.length > 2) S.region(flat);
       S.curve(s.layer, (similarity(M) ? polyLength(verts, closed) * Math.sqrt(Math.abs(det(M))) : flatLen(closed ? [...flat, flat[0]] : flat)), flat, vi, 'pline');
@@ -945,6 +970,31 @@ function emitEntity(ctx, r, ents, idx, m, inh) {
   }
 }
 
+// 顶点带起止宽度且宽度有变化（PLINE 画的箭头、渐变线）：直线段按梯形填充，弧段和零宽段照常画线。
+// verts 每项 [x, y, 凸度, 起点宽, 终点宽]。宽度处处相同时返回 false，交给普通线宽。
+function taperedPoly(S, s, M, verts, closed, type) {
+  const n = verts.length, segs = closed ? n : n - 1;
+  if (segs < 1) return false;
+  let varies = false;
+  const w0 = verts[0][3] || 0;
+  for (let k = 0; k < segs && !varies; k++) { const v = verts[k]; if ((v[3] || 0) !== w0 || (v[4] || 0) !== w0) varies = true; }
+  if (!varies) return false;
+  for (let k = 0; k < segs; k++) {
+    const a = verts[k], b = verts[(k + 1) % n];
+    const sw = a[3] || 0, ew = a[4] || 0;
+    const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+    if (!(L > 0)) continue;
+    if ((sw > 0 || ew > 0) && !a[2]) {
+      const nx = -dy / L, ny = dx / L;
+      const q = [[a[0] + nx * sw / 2, a[1] + ny * sw / 2], [b[0] + nx * ew / 2, b[1] + ny * ew / 2], [b[0] - nx * ew / 2, b[1] - ny * ew / 2], [a[0] - nx * sw / 2, a[1] - ny * sw / 2]];
+      S.fill(s, [q.map(p => ap(M, p[0], p[1]))], type);
+    } else {
+      const { ops } = polyOps(M, [a, b], false);
+      S.path(s, ops, null, (sw + ew) / 2 * Math.sqrt(Math.abs(det(M))), type);
+    }
+  }
+  return true;
+}
 function polyLength(verts, closed) {
   let L = 0; const n = verts.length; const segs = closed ? n : n - 1;
   for (let k = 0; k < segs; k++) {
@@ -1037,7 +1087,7 @@ function emitText(ctx, r, m, s) {
   const wf = wfRaw > 0 ? wfRaw : 1; // 0 不是合法宽度，按默认 1，否则所有字叠在同一个点上
   const obl = (r.has(51) ? r.f(51) : (style ? style.obl : 0)) * Math.PI / 180;
   let ha = r.i(72, 0), va = r.i(73, 0);
-  if (r.type === 'ATTRIB') va = r.i(74, va);
+  if (r.type === 'ATTRIB') va = r.i(74, 0); // ATTRIB 的 73 是字段长度，竖直对齐在 74
   const p1 = [r.f(10), r.f(20)], p2 = [r.f(11, p1[0]), r.f(21, p1[1])];
   let rot = r.f(50) * Math.PI / 180;
   const gen = r.i(71, 0);

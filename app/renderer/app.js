@@ -225,14 +225,21 @@ async function openFileObj(f) {
   if (p) return openPath(p);
   return openBytes(f.name, new Uint8Array(await f.arrayBuffer()), null);
 }
+// 正在打开的图纸：同一个文件快速打开两次（双击两下、拖进来又从资源管理器打开）只开一个标签
+const opening = new Map();
 async function openPath(p) {
   const exist = state.docs.find(d => d.path === p && d.kind === 'drawing');
   if (exist) { activate(exist); return exist; }
-  busy(tr('正在读取文件…'));
-  try {
-    const bytes = await B.readFile(p);
-    return await openBytes(p.split(/[\\/]/).pop(), bytes, p);
-  } catch (err) { busy(); toast(tr('打开失败：') + err.message); }
+  if (opening.has(p)) return opening.get(p);
+  const job = (async () => {
+    busy(tr('正在读取文件…'));
+    try {
+      const bytes = await B.readFile(p);
+      return await openBytes(p.split(/[\\/]/).pop(), bytes, p);
+    } catch (err) { busy(); toast(tr('打开失败：') + err.message); }
+  })();
+  opening.set(p, job);
+  try { return await job; } finally { opening.delete(p); }
 }
 async function openBytes(name, bytes, path, opt = {}) {
   if (!/\.(dwg|dxf)$/i.test(name)) { toast(tr('只支持 DWG / DXF 图纸')); return; }
@@ -1797,7 +1804,7 @@ async function saveDxf(d, bb) {
     const m = await rpc({ cmd: 'dxf', doc: d.id, edits: d.textEdits, bbox: bb ? [bb[0] + spOrigin()[0], bb[1] + spOrigin()[1], bb[2] + spOrigin()[0], bb[3] + spOrigin()[1]] : null });
     busy();
     await saveBytes(baseName(d) + (bb ? tr('_分割') : tr('_另存')) + '.dxf', new Uint8Array(m.bytes));
-    if (m.dropped) toast(tr('已导出。{0} 个天正/专业软件自定义对象无法转换，已略去', m.dropped), 6000);
+    if (m.dropped) toast(tr('已导出。{0} 个天正/专业软件对象或嵌入表格无法写入文件，已略去', m.dropped), 6000);
   } catch (e) { busy(); toast(tr('导出失败：') + e.message); }
 }
 
@@ -1814,7 +1821,7 @@ async function saveDwg(d) {
       const m = await rpc({ cmd: 'dxf', doc: d.id, edits: d.textEdits, bbox: null });
       res = await B.saveDwg(baseName(d) + tr('_另存') + '.dwg', new Uint8Array(m.bytes), r.ver);
       busy();
-      if (res && res.ok) { toast(tr('已另存为 DWG：{0}', res.path) + (m.dropped ? tr('（{0} 个天正/专业软件自定义对象无法转换，已略去）', m.dropped) : ''), 7000); return; }
+      if (res && res.ok) { toast(tr('已另存为 DWG：{0}', res.path) + (m.dropped ? tr('（{0} 个天正/专业软件对象或嵌入表格无法写入文件，已略去）', m.dropped) : ''), 7000); return; }
     } catch (e) { busy(); toast(tr('导出失败：') + (e.message || e)); return; }
     if (!res || res.canceled) return;
     if (res.error) { toast(tr('转换失败：') + res.error, 8000); return; }
@@ -2038,7 +2045,7 @@ function findPanel(body, d) {
     if (res.length) out.append(h('div', { cls: 'row', style: 'margin-bottom:6px' }, h('button', { cls: 'btn', text: tr('导出查找结果'), onclick: () => {
       const rows = [[tr('序号'), tr('文字'), tr('所在空间'), tr('图层'), 'X', 'Y']];
       res.forEach((r, i) => { const o = r.sp.origin || [0, 0]; rows.push([i + 1, r.t.s, spName(r.sp), r.t.layer, +(r.t.x + o[0]).toFixed(3), +(r.t.y + o[1]).toFixed(3)]); });
-      saveBytes(baseName(d) + tr('_查找_') + q + '.xlsx', makeXlsx([{ name: tr('查找结果'), rows, widths: [6, 50, 10, 16, 14, 14] }]));
+      saveBytes(baseName(d) + tr('_查找_') + safeName(q) + '.xlsx', makeXlsx([{ name: tr('查找结果'), rows, widths: [6, 50, 10, 16, 14, 14] }]));
     } })));
     for (const r of res.slice(0, 600)) {
       const i = r.t.s.toLowerCase().indexOf(ql);
