@@ -1061,6 +1061,8 @@ function emitText(ctx, r, m, s) {
     if (!ln) return;
     const item = textItem(m, anchor[0], anchor[1], rot, hh, wf, obl, ha, va, ln, fontFor(doc, r.s(7)), s, gen, -i * lh);
     Object.assign(item, styleFace(style));
+    // 已解码的天正引注统一用随包中文字体；保留原锚点、方向、字高和对齐。
+    if (r._tchBundled) Object.assign(item, { sf: '', bf: '', ff: '', f: 0 });
     item.hd = r.s(5); if (ctx.depth) item.blk = 1;
     if (n > 1) { item.mt = 1; item.li = i; item.ln = n; if (i === 0) item.para = lines.join('\n'); }
     if (fitBase > 0) item.fit = nat(ln) * fitBase * mscale;

@@ -130,7 +130,7 @@ function injectTch(doc, tch) {
     for (const { type, pairs } of recs) {
       pairs.unshift([8, lay], [62, it.color]);
       if (st && (type === 'TEXT' || type === 'MTEXT')) pairs.push([7, st]);
-      place(type, pairs, it.mode, it.owner, { _tch: it.f.kind });
+      place(type, pairs, it.mode, it.owner, { _tch: it.f.kind, _tchBundled: it.f.rotFrom === 'stream' || !!it.f.landingText });
     }
     n++;
   }

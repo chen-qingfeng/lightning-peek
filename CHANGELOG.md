@@ -2,6 +2,16 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.17] – Preview – 2026-11-11
+
+### Fixed
+- Tianzheng 2007 numbers in the string stream are reversed before the salt characters are removed, so scale, height and angle read as stored.
+- Leader text uses the stored millimetre height times the object scale. Display drops one step (3.5 mm draws as 3 mm, 3 mm draws as 2.5 mm) without moving the anchor or the leader geometry.
+- Stored rotation, including zero, is kept. Pairing and a layout viewport no longer replace it. Attachment keeps left, centre and right, including an unpaired top attachment.
+- Green arrow notes sit on the landing segment, not on the arrow tip.
+- The ten multileader objects on the sample drawing draw their landing, leader lines and arrowheads. Text stays on the separate text objects.
+- Decoded 2007 leader text uses the bundled Noto Sans SC face. The insertion point and alignment are unchanged.
+
 ## [0.2.13] – Preview – 2026-11-11
 
 ### Fixed
