@@ -296,6 +296,20 @@ test('text anchor is the first 3-digit code after the words, not a later one', (
   assert.equal(textAnchor(['注', encDigits('102')]), 0);
 });
 
+test('old-format text with rot 0 is not turned by a rotated viewport', () => {
+  const old = { kind: 'TCH_TEXT', x: 1, y: 1, z: 0, h: 2.5, rot: 0, align: 10, scale: 1 };
+  const doc = {
+    header: { $UCSXDIR: [[10, '1'], [20, '0']] },
+    entities: [{ type: 'VIEWPORT', i: () => 2, f: (c, d = 0) => ({ 40: 20, 41: 20, 45: 20, 12: 0, 22: 0, 17: 0, 27: 0, 51: 0, 111: 0.10001, 121: -0.99499 }[c] ?? d) }],
+    blocks: new Map(),
+  };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', mode: 2, f: old }] });
+  assert.equal(old.rot, 0);
+  assert.equal(old.align, 10);
+  assert.equal(old.h, 2.5);
+  assert.equal(old.rotFrom, undefined);
+});
+
 test('a layout viewport UCS rotates only model text inside that viewport', () => {
   const ang = Math.atan2(-0.99499, 0.10001);
   const f = { kind: 'TCH_TEXT', x: 1, y: 1, h: 2, rot: 0, anchor: 7, align: 10 };

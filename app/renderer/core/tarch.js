@@ -348,7 +348,8 @@ function angDiff(a, b) {
   if (d < -Math.PI) d += 2 * Math.PI;
   return Math.abs(d);
 }
-// 只处理模型空间里的单行天正文字。图纸空间不动。
+// 只处理模型空间里、从字符串流解出来的单行天正文字。图纸空间不动。
+// 2000/2004 的文字没有 anchor，方向和对齐已经在对象里，这里不动。
 // TCH_MTEXT 保持名义字高和左上对齐，不在这里改方向。
 // decodeTchStream 给单行文字的结果里没有 pts，所以不读引线点链。
 // 配对方向先记在 pairRot。这里再和坐标系比：差过约 5° 就丢掉配对，改用坐标系。
@@ -362,6 +363,9 @@ export function orientTch(doc, tch) {
     const f = it.f;
     if (!f || it.mode === 1) continue;
     if (it.cls !== 'TCH_TEXT' || f.kind !== 'TCH_TEXT') continue;
+    // 2000/2004 走 decodeTch，自带 rot 和 align，没有 anchor。
+    // rot 为 0 时挡不住，会被所在视口的用户坐标转掉。只处理字符串流解出来的文字。
+    if (f.anchor === undefined) continue;
     if (f.rot && f.rotFrom !== 'pair') continue;
     const vp = viewportFor(vps, f.x, f.y);
     const viewUcs = vp && Math.abs(vp.ucs) > 1e-4 ? vp.ucs : 0;
