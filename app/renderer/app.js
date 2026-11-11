@@ -8,11 +8,6 @@ import { guessUnit, chainage, arc3, flattenArcs, footOn, linOrient, polyArea, of
 
 // ---------------- 桥接（Electron / 浏览器兜底） ----------------
 const B = window.sdkt || browserBridge();
-// 安卓验证壳在 app.js 之前设置 window.__peek。桌面版没有这个对象，调用是空的。
-function peek(ev, data) {
-  const h = window.__peek;
-  if (h && h.on) { try { h.on(ev, data); } catch (e) { /* 验证面板不影响开图 */ } }
-}
 function browserBridge() {
   const ls = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch (e) { return d; } };
   return {
@@ -43,9 +38,7 @@ let worker = null, rpcId = 1; const pending = new Map();
 let DPR = window.devicePixelRatio || 1;
 
 function startWorker() {
-  const url = new URL('./core/worker.js', import.meta.url);
-  if (window.__peek && window.__peek.dedicatedWasm) url.searchParams.set('dedicated', '1');
-  worker = new Worker(url, { type: 'module' });
+  worker = new Worker(new URL('./core/worker.js', import.meta.url), { type: 'module' });
   worker.onmessage = (e) => {
     const m = e.data; const p = pending.get(m.id);
     if (!p) return;
@@ -55,12 +48,6 @@ function startWorker() {
   };
   worker.onerror = (e) => { for (const p of pending.values()) p.rej(new Error(tr('解析线程出错：') + (e.message || ''))); pending.clear(); worker = null; };
 }
-function resetWorker() {
-  if (worker) { try { worker.terminate(); } catch (e) { /* 忽略 */ } worker = null; }
-  for (const p of pending.values()) p.rej(new Error('解析线程已重置'));
-  pending.clear();
-}
-window.__peekResetWorker = resetWorker;
 function rpc(msg, transfer) {
   if (!worker) startWorker();
   const id = msg.id || rpcId++; msg.id = id;
@@ -236,26 +223,23 @@ $('#file-input').onchange = async (e) => { for (const f of e.target.files) await
 async function openFileObj(f) {
   const p = B.pathForFile ? B.pathForFile(f) : '';
   if (p) return openPath(p);
-  peek('read-start', { name: f.name, bytes: f.size || 0 });
+  let bytes;
   const tRead = performance.now();
-  try {
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    peek('read-end', { name: f.name, bytes: bytes.byteLength, ms: performance.now() - tRead });
-    return await openBytes(f.name, bytes, null);
-  } catch (err) { peek('fail', { name: f.name, message: String(err && err.message || err) }); }
+  try { bytes = new Uint8Array(await f.arrayBuffer()); }
+  catch (err) { toast(tr('打开失败：') + (err && err.message || err)); throw err; }
+  if (window.__peek) window.__peek.read = { name: f.name, bytes: bytes.byteLength, ms: performance.now() - tRead };
+  const open = (window.__sdkt && window.__sdkt.openBytes) || openBytes;
+  return open(f.name, bytes, null);
 }
 async function openPath(p) {
   const exist = state.docs.find(d => d.path === p && d.kind === 'drawing');
   if (exist) { activate(exist); return exist; }
-  const name = p.split(/[\\/]/).pop();
-  peek('read-start', { name, bytes: 0 });
   busy(tr('正在读取文件…'));
-  const tRead = performance.now();
   try {
     const bytes = await B.readFile(p);
-    peek('read-end', { name, bytes: bytes.byteLength || bytes.length || 0, ms: performance.now() - tRead });
-    return await openBytes(name, bytes, p);
-  } catch (err) { busy(); peek('fail', { name, message: String(err && err.message || err) }); toast(tr('打开失败：') + err.message); }
+    const open = (window.__sdkt && window.__sdkt.openBytes) || openBytes;
+    return await open(p.split(/[\\/]/).pop(), bytes, p);
+  } catch (err) { busy(); toast(tr('打开失败：') + err.message); }
 }
 async function openBytes(name, bytes, path, opt = {}) {
   if (!/\.(dwg|dxf)$/i.test(name)) { toast(tr('只支持 DWG / DXF 图纸')); return; }
@@ -264,14 +248,12 @@ async function openBytes(name, bytes, path, opt = {}) {
   try {
     const id = rpcId++;
     const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    const dedicatedWasm = !!(window.__peek && window.__peek.dedicatedWasm);
-    const m = await rpc({ id, cmd: 'open', name, bytes: buf, dedicatedWasm }, [buf]);
-    if (!opt.hidden) peek('parsed', { name, info: m.scene && m.scene.info });
+    const m = await rpc({ id, cmd: 'open', name, bytes: buf }, [buf]);
     const sc = m.scene;
     const doc = {
       kind: 'drawing', id, name, path, scene: sc, spaceIdx: 0, views: {}, layerOn: new Map(sc.layers.map(l => [l.name, l.on])),
       measures: [], annots: [], undo: [], cat: '默认分类', cats: ['默认分类'], textEdits: {}, nextNo: 1,
-      unit: unitFor(sc), openMs: Math.round(performance.now() - t0), _peek: !opt.hidden,
+      unit: unitFor(sc), openMs: Math.round(performance.now() - t0),
     };
     for (const sp of sc.spaces) { sp.items = { m: doc.measures }; }
     await loadSidecar(doc);
@@ -282,7 +264,7 @@ async function openBytes(name, bytes, path, opt = {}) {
     if (!opt.hidden && sc.stats.entities === 0) { toast(tr('这张图纸里没有可显示的图元'), 5000); return doc; }
     if (!opt.hidden) toast(tr('闪电打开 {0}　{1}　{2} 个图元　用时 {3} 秒', name, sc.info.version, sc.stats.entities.toLocaleString(), (doc.openMs / 1000).toFixed(2)) + (sk.length ? tr('　（{0} 暂不显示）', sk.map(([k, v]) => k + '×' + v).join('，')) : '') + (doc.unit.uf !== 1 ? tr('　测量单位：1 图纸单位 = {0} mm（{1}，可点状态栏的比例修改）', +doc.unit.uf.toFixed(4), tr(UNIT_WHY[doc.unit.why] || '')) : '') + fontNote, 7000);
     return doc;
-  } catch (err) { busy(); peek('fail', { name, message: String(err && err.message || err) }); toast(tr('打开失败：') + err.message, 6000); console.error(err); }
+  } catch (err) { busy(); toast(tr('打开失败：') + err.message, 6000); console.error(err); }
 }
 // 国内图纸的 $INSUNITS 常被误设为英寸；只在英制图纸（MEASUREMENT=0）里才信英寸/英尺
 function applyTextEdits(doc) {
@@ -483,10 +465,6 @@ function draw() {
       if (sp.paper) drawPaper(d, sp, M, rect); else { R.drawSpace(ctx, sp, M, rect, { dpr: DPR }); drawXrefs(d, ctx, sp, M, rect, DPR); }
     }
     painted = key;
-    if (d.kind === 'drawing' && d._peek && !d._peekPaint) {
-      d._peekPaint = true;
-      peek('first-paint', { name: d.name, ms: performance.now() });
-    }
   }
   ctx = octx;
   octx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1862,7 +1840,10 @@ function updateScaleInfo() {
   const d = state.cur;
   $('#st-scale').textContent = d && d.kind === 'drawing' ? tr('比例：1 图纸单位 = {0} mm', +d.unit.uf.toFixed(6)) + (d.unit.why ? paren(tr(UNIT_WHY[d.unit.why] || '')) : '') : '';
   $('#st-scale').title = tr('点击修改比例与单位'); $('#st-scale').style.cursor = 'pointer'; $('#st-scale').onclick = () => state.cur && state.cur.kind === 'drawing' && scaleDialog();
-  $('#st-info').textContent = d && d.kind === 'drawing' ? tr('{0} · {1} 图元', d.scene.info.version, d.scene.stats.entities.toLocaleString()) : '';
+  const info = $('#st-info');
+  const broken = d && d.kind === 'drawing' && d.scene.stats && d.scene.stats.brokenText;
+  info.textContent = d && d.kind === 'drawing' ? tr('{0} · {1} 图元', d.scene.info.version, d.scene.stats.entities.toLocaleString()) + (broken ? tr(' · 文字可能损坏') : '') : '';
+  info.title = broken ? tr('部分文字像是编码损坏（连续的 ◇ 或替换符）。可换一份 DXF，或在原 CAD 里另存后再打开。') : '';
 }
 async function markSettings() {
   const d = state.cur; if (!d || d.kind !== 'drawing') return;
@@ -2045,6 +2026,9 @@ function locateMeasure(m) {
   state.selMeasure = m.id; refreshSide();
 }
 function findPanel(body, d) {
+  if (d.scene && d.scene.stats && d.scene.stats.brokenText) {
+    body.append(h('div', { cls: 'disclaimer', text: tr('部分文字像是编码损坏（连续的 ◇ 或替换符）。可换一份 DXF，或在原 CAD 里另存后再打开。') }));
+  }
   const input = h('input', { type: 'text', placeholder: tr('输入要查找的文字，回车搜索') });
   const out = h('div', { style: 'margin-top:8px' });
   const run = () => {

@@ -1,9 +1,13 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
 import { extractTch, tchBuild, tchMarkup, TCH_CLASSES } from './tarch.js';
+import { convertInChild, jsMem, wasmBytesOf } from './dwg-host.js';
 
 let wasm = null;
 let booting = null;
+let lastCompileMs = 0;
+const workerStarted = performance.now();
+let runIndex = 0;
 // 安卓验证壳可让每张图在单独的 Worker 里转换，转完就终止，好把 wasm 堆还给系统。
 // 桌面版不带 ?dedicated=1，行为与原来一样：转换后丢掉模块并立刻再准备一份。
 const dedicatedMode = new URL(import.meta.url).searchParams.get('dedicated') === '1';
@@ -13,8 +17,10 @@ function bootWasm() {
   if (wasm) return Promise.resolve(wasm);
   if (!booting) {
     booting = (async () => {
+      const tBoot = performance.now();
       const mod = (await import('../lib/libredwg-web.js')).default;
       const m = await mod({ locateFile: (f) => new URL('../lib/' + f, import.meta.url).href });
+      lastCompileMs = performance.now() - tBoot;
       wasm = m;
       booting = null;
       return m;
@@ -53,7 +59,8 @@ function dwgToDxf(m, bytes) {
       if (wasm) { try { tch = extractTch(m, dwg, hex, mode); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
     }
     const wasmBytes = m.HEAPU8 ? m.HEAPU8.byteLength : wasmBefore;
-    return { bytes: out, warn: err, oles, tch, wasmBefore, wasmBytes };
+    // 非专用模式在 finally 里立刻再 boot，旧模块要等这次调用结束才能被回收。
+    return { bytes: out, warn: err, oles, tch, wasmBefore, wasmBytes, wasmOverlap: !!reuseWasm, jsAfter: jsMem() };
   } finally {
     // 写某些图（例如这张 AC1015 天正图）的 DXF 时，LibreDWG 会把 wasm 堆写坏，
     // 下一张图再读就变成 memory access out of bounds。DXF 已经复制出来，丢掉整个模块。
@@ -169,68 +176,54 @@ function collect(scene, list = []) {
   return list;
 }
 
-function convertInChild(bytes) {
-  return new Promise((resolve, reject) => {
-    const url = new URL('./worker.js', import.meta.url);
-    url.searchParams.set('dedicated', '1');
-    const child = new Worker(url, { type: 'module' });
-    const id = 1;
-    const finish = () => { try { child.terminate(); } catch (e) { /* 已经结束 */ } };
-    child.onmessage = (e) => {
-      const m = e.data;
-      if (!m || m.id !== id || m.progress) return;
-      finish();
-      if (m.ok) resolve(m.result);
-      else reject(new Error(m.error || '转换失败'));
-    };
-    child.onerror = (e) => { finish(); reject(new Error(e.message || '转换线程出错')); };
-    const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
-    child.postMessage({ id, cmd: 'convert-only', bytes: buf }, [buf]);
-  });
-}
-async function convertDwg(bytes, dedicated) {
-  if (dedicated) {
-    // 父线程不再留着一份 wasm，避免和专用线程叠成两块堆。
-    reuseWasm = false;
-    wasm = null;
-    booting = null;
-    return convertInChild(bytes);
-  }
-  const m = await lib();
-  return dwgToDxf(m, bytes);
+function memSnap(wasmBytes) {
+  return { js: jsMem(), wasm: wasmBytes, t: Math.round(performance.now()) };
 }
 async function open(id, name, bytes, opt = {}) {
+  runIndex += 1;
   const t0 = performance.now();
+  const dedicated = !!(opt.dedicatedWasm || dedicatedMode);
+  const hadWasm = !!wasm;
+  const memBefore = memSnap(wasmBytesOf(wasm));
   const lower = name.toLowerCase();
   let dxfBytes = bytes, warn = 0, version = '', oles = null, tch = null;
-  let dwgMs = 0, wasmBefore = 0, wasmBytes = 0;
+  let dwgMs = 0, wasmBefore = 0, wasmBytes = 0, wasmOverlap = false, jsAfterConvert = null, compileMs = 0;
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
     const tA = performance.now();
-    const r = await convertDwg(bytes, !!(opt.dedicatedWasm || dedicatedMode));
+    if (dedicated && !dedicatedMode) { wasm = null; booting = null; }
+    const r = dedicated ? await convertInChild(bytes) : await (async () => { const m = await lib(); compileMs = hadWasm ? 0 : lastCompileMs; return dwgToDxf(m, bytes); })();
     dwgMs = performance.now() - tA;
-    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
-    wasmBefore = r.wasmBefore || 0; wasmBytes = r.wasmBytes || 0;
+    dxfBytes = r.bytes instanceof ArrayBuffer ? new Uint8Array(r.bytes) : r.bytes;
+    warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
+    wasmBefore = r.wasmBefore || 0; wasmBytes = r.wasmBytes || 0; wasmOverlap = !!r.wasmOverlap; jsAfterConvert = r.jsAfter || null;
+    compileMs = dedicated ? (r.compileMs || 0) : (hadWasm ? 0 : lastCompileMs);
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
   }
+  const memAfterConvert = memSnap(wasmBytes || wasmBytesOf(wasm));
+  if (jsAfterConvert) memAfterConvert.js = jsAfterConvert;
   post({ id, progress: '正在解析图元…' });
   const tB = performance.now();
-  const { text, enc } = decodeDxf(dxfBytes);
+  const decoded = decodeDxf(dxfBytes);
+  const text = decoded.text, enc = decoded.enc, codepageDeclared = !!decoded.codepageDeclared;
   const doc = parseDxf(text);
   injectOles(doc, oles);
   const tchTexts = injectTch(doc, tch);
   if (!version) { const v = doc.header.$ACADVER; version = v && v[0] ? v[0][1] : 'DXF'; }
   const t1 = performance.now();
-  const scene = buildScene(doc);
+  const scene = buildScene(doc, { codepageDeclared });
   for (const [k, v] of Object.entries(tchSkipped(tch))) scene.stats.skipped[k] = v;
   const t2 = performance.now();
-  docs.set(id, { bytes: dxfBytes.slice(), enc, warn, oles, tch });
+  const memAfterParse = memSnap(wasmBytesOf(wasm) || wasmBytes);
+  docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch });
   scene.info = {
     version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts,
     dwgMs: Math.round(dwgMs), parseMs: Math.round(t2 - tB),
-    wasmBefore, wasmBytes, wasmGrew: wasmBytes > wasmBefore,
+    wasmBefore, wasmBytes, wasmGrew: wasmBytes > wasmBefore, wasmOverlap,
+    wasmCompileMs: Math.round(compileMs), workerAgeMs: Math.round(performance.now() - workerStarted), runIndex,
+    mem: { before: memBefore, afterConvert: memAfterConvert, afterParse: memAfterParse },
   };
   return scene;
 }
@@ -246,14 +239,16 @@ function verName(v) {
   return m[v] ? 'AutoCAD ' + m[v] : v;
 }
 
-function modelTexts(doc, origin) {
-  const sc = buildScene(doc, origin ? { origin } : {});
+function modelTexts(doc, origin, codepageDeclared) {
+  const opt = { codepageDeclared: !!codepageDeclared };
+  if (origin) opt.origin = origin;
+  const sc = buildScene(doc, opt);
   const sp = sc.spaces[0];
   return { sp, origin: sc.origin };
 }
 // 自动对齐：用两图里各只出现一次的相同文字，求出最常见的整体位移
-function autoAlign(A, B) {
-  const a = modelTexts(A), b = modelTexts(B);
+function autoAlign(A, B, cpA, cpB) {
+  const a = modelTexts(A, null, cpA), b = modelTexts(B, null, cpB);
   const ua = new Map(), ub = new Map();
   const uniq = (sp, o, m) => { const c = new Map(); for (const t of sp.texts) c.set(t.s, (c.get(t.s) || 0) + 1); for (const t of sp.texts) if (c.get(t.s) === 1 && t.s.length >= 2) m.set(t.s, [t.x + o[0], t.y + o[1]]); };
   uniq(a.sp, a.origin, ua); uniq(b.sp, b.origin, ub);
@@ -265,18 +260,20 @@ function autoAlign(A, B) {
   return best;
 }
 function compare(aId, bId, opts = {}) {
+  const DA = docs.get(aId), DB = docs.get(bId);
   const A = docOf(aId), B = docOf(bId);
   if (!A || !B) throw new Error('对比的图纸已关闭');
-  const pre = buildScene(B, { sinkFactory: () => new SigSink(1) });
+  const cpA = !!(DA && DA.codepageDeclared), cpB = !!(DB && DB.codepageDeclared);
+  const pre = buildScene(B, { codepageDeclared: cpB, sinkFactory: () => new SigSink(1) });
   const mb = pre.spaces[0];
   const size = Math.max(mb.bbox[2] - mb.bbox[0], mb.bbox[3] - mb.bbox[1], 1);
   const q = opts.tol > 0 ? opts.tol : size * 2e-6;
   const origin = pre.origin;
   let shift = [0, 0], alignVotes = 0;
-  if (opts.align !== false) { const al = autoAlign(A, B); shift = al.d; alignVotes = al.n; }
+  if (opts.align !== false) { const al = autoAlign(A, B, cpA, cpB); shift = al.d; alignVotes = al.n; }
   const sinkA = new SigSink(q), sinkB = new SigSink(q);
-  buildScene(A, { origin: [origin[0] - shift[0], origin[1] - shift[1]], sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkA : new SigSink(q)) });
-  buildScene(B, { origin, sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkB : new SigSink(q)) });
+  buildScene(A, { codepageDeclared: cpA, origin: [origin[0] - shift[0], origin[1] - shift[1]], sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkA : new SigSink(q)) });
+  buildScene(B, { codepageDeclared: cpB, origin, sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkB : new SigSink(q)) });
   const count = (items) => { const m = new Map(); for (const it of items) m.set(it.sig, (m.get(it.sig) || 0) + 1); return m; };
   const keyA = count(sinkA.items), keyB = count(sinkB.items);
   const same = [], add = [], del = [];
@@ -401,7 +398,7 @@ function filterRegion(text, bb) {
   return out.join('\r\n');
 }
 function post(m, t) { self.postMessage(m, t || []); }
-if (!dedicatedMode) bootWasm().catch(() => {});
+if (!dedicatedMode) bootWasm().catch((e) => post({ bootError: String(e && e.stack || e.message || e) }));
 self.onmessage = async (e) => {
   const { id, cmd } = e.data;
   try {
@@ -409,8 +406,9 @@ self.onmessage = async (e) => {
       reuseWasm = false;
       const m = await lib();
       const r = dwgToDxf(m, new Uint8Array(e.data.bytes));
-      const payload = { bytes: r.bytes, warn: r.warn, oles: r.oles, tch: r.tch, wasmBefore: r.wasmBefore, wasmBytes: r.wasmBytes };
-      post({ id, ok: true, result: payload });
+      const payload = { bytes: r.bytes, warn: r.warn, oles: r.oles, tch: r.tch, wasmBefore: r.wasmBefore, wasmBytes: r.wasmBytes, wasmOverlap: false, jsAfter: r.jsAfter, compileMs: lastCompileMs };
+      const transfers = r.bytes && r.bytes.buffer ? [r.bytes.buffer] : [];
+      post({ id, ok: true, result: payload }, transfers);
     } else if (cmd === 'open') {
       const scene = await open(id, e.data.name, new Uint8Array(e.data.bytes), { dedicatedWasm: !!e.data.dedicatedWasm });
       post({ id, ok: true, scene }, collect(scene));

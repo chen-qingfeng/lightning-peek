@@ -15,9 +15,13 @@ function nativeCall(method, args) {
   return c.nativePromise('PeekProbe', method, args || {});
 }
 
+function encodeFilePath(p) {
+  return String(p).split('/').map((seg, i) => (i === 0 ? seg : encodeURIComponent(seg))).join('/');
+}
 async function readLocalPath(p) {
   const c = cap();
-  const url = c && c.convertFileSrc ? c.convertFileSrc(p) : p;
+  const path = encodeFilePath(p);
+  const url = c && c.convertFileSrc ? c.convertFileSrc(path) : path;
   const r = await fetch(url);
   if (!r.ok) throw new Error('读文件失败 ' + r.status);
   return new Uint8Array(await r.arrayBuffer());
@@ -42,8 +46,23 @@ window.sdkt = {
     const w = window.open('');
     if (w) { w.document.write(`<img src="${o.dataUrl}" style="width:100%">`); w.print(); }
   },
-  readFile: (p) => readLocalPath(p),
-  onOpenFile: (cb) => { openCb = cb; while (queued.length) cb(queued.shift()); },
+  readFile: async (p) => {
+    const t = performance.now();
+    const bytes = await readLocalPath(p);
+    const name = String(p).split(/[/\\]/).pop();
+    window.__peek.read = { name, bytes: bytes.byteLength, ms: performance.now() - t };
+    return bytes;
+  },
+  onOpenFile: (cb) => {
+    openCb = cb;
+    const start = performance.now();
+    const flush = () => {
+      const ready = window.__sdkt && window.__sdkt.openBytes && window.__sdkt.openBytes.__peekWrapped;
+      if (!ready && queued.length && performance.now() - start < 10000) { requestAnimationFrame(flush); return; }
+      while (queued.length) cb(queued.shift());
+    };
+    flush();
+  },
 };
 
 const runs = [];
@@ -53,6 +72,10 @@ let peak = emptyPeak();
 let device = null;
 let buildInfo = null;
 let deviceError = '';
+let incomingError = '';
+let bootError = '';
+let crashed = ls('peek.inflight', null);
+try { const saved = ls('peek.runs', []); if (Array.isArray(saved)) runs.push(...saved.slice(0, 3)); } catch (e) { /* 忽略 */ }
 
 function emptyPeak() {
   return { jsUsed: 0, jsTotal: 0, pssKb: 0, rssKb: 0, nativeHeapKb: 0 };
@@ -76,6 +99,8 @@ async function sampleNative() {
     peak.pssKb = Math.max(peak.pssKb, m.totalPssKb || 0);
     peak.rssKb = Math.max(peak.rssKb, m.rssKb || 0);
     peak.nativeHeapKb = Math.max(peak.nativeHeapKb, m.nativeHeapKb || 0);
+    peak.otherRssKb = Math.max(peak.otherRssKb || 0, m.otherRssKb || 0);
+    peak.otherCount = Math.max(peak.otherCount || 0, m.otherCount || 0);
     peak.last = m;
   } catch (e) { peak.nativeError = String(e && e.message || e); }
 }
@@ -83,7 +108,7 @@ function startSampling() {
   peak = emptyPeak();
   noteHeap();
   if (timer) clearInterval(timer);
-  timer = setInterval(() => { sampleNative().catch(() => {}); }, 250);
+  timer = setInterval(() => { sampleNative().catch(() => {}); }, 100);
   sampleNative().catch(() => {});
 }
 function stopSampling() {
@@ -161,39 +186,59 @@ function buildLines() {
   return '包：' + (buildInfo.variant === 'smallmem' ? '调小内存' : '原始 wasm') + '，初始 ' + pages + ' 页（' + buildInfo.wasmInitialMiB + ' MiB）';
 }
 
+function memLine(label, snap) {
+  if (!snap) return label + '：—';
+  const js = snap.js ? fmtBytes(snap.js.used) : '无 performance.memory';
+  return label + '：wasm ' + fmtBytes(snap.wasm) + '，JS ' + js;
+}
 function runText(row, i) {
   const info = row.info || {};
-  const paintMs = row.paintAt != null && row.parseDone != null ? row.paintAt - row.parseDone : null;
   const grew = info.wasmGrew ? '，堆增长了' : (info.wasmBytes ? '，堆没有增长' : '');
   const pk = row.peak || {};
-  if (row.error) {
-    return ['图' + (i + 1) + ' ' + row.name, '打开失败：' + row.error, '读文件：' + fmtMs(row.readMs)].join('\n');
-  }
-  return [
-    '图' + (i + 1) + ' ' + row.name,
+  const lines = ['图' + (i + 1) + ' ' + row.name + (info.runIndex ? '  #' + info.runIndex : '')];
+  if (row.error) lines.push('打开失败：' + row.error);
+  lines.push(
     '文件大小：' + fmtBytes(row.bytes),
     '读文件：' + fmtMs(row.readMs),
     'DWG 转换：' + fmtMs(info.dwgMs),
     '解析：' + fmtMs(info.parseMs),
-    '首次绘制：' + fmtMs(paintMs),
+    '准备（字体/旁注/提示）：' + fmtMs(row.prepMs),
+    '首次绘制：' + fmtMs(row.paintMs),
     '从选中到画完：' + fmtMs(row.totalMs),
+    'wasm 编译：' + fmtMs(info.wasmCompileMs) + (info.workerAgeMs != null ? '，线程已运行 ' + fmtMs(info.workerAgeMs) : ''),
+    '冷热：' + (info.wasmCompileMs > 20 ? '冷（这次编译了 wasm）' : '热（wasm 已经在）'),
     'wasm：' + fmtBytes(info.wasmBefore) + ' → ' + fmtBytes(info.wasmBytes) + grew,
-    'JS 堆峰值：' + (pk.jsUsed ? fmtBytes(pk.jsUsed) + ' / ' + fmtBytes(pk.jsTotal) : (jsHeap() ? '0' : '这个 WebView 没有 performance.memory')),
-    'PSS 峰值：' + fmtKb(pk.pssKb),
+    info.wasmOverlap ? '非专用：转换后立刻再加载一份 wasm，旧的要等回收，两份会叠一会儿' : '专用转换：转完即丢掉那份 wasm',
+    memLine('转换前', info.mem && info.mem.before),
+    memLine('转换后', info.mem && info.mem.afterConvert),
+    memLine('解析后', info.mem && info.mem.afterParse),
+    '主线程 JS 堆峰值：' + (pk.jsUsed ? fmtBytes(pk.jsUsed) + ' / ' + fmtBytes(pk.jsTotal) : (jsHeap() ? '0' : '这个 WebView 没有 performance.memory')),
+    'PSS 峰值：' + fmtKb(pk.pssKb) + (pk.otherCount ? '，另看到 ' + pk.otherCount + ' 个相关进程 RSS ' + fmtKb(pk.otherRssKb) : ''),
     'RSS 峰值：' + fmtKb(pk.rssKb),
-  ].join('\n');
+  );
+  if (pk.otherNote) lines.push('其他进程：' + pk.otherNote);
+  if (row.release && row.release.length) {
+    for (const s of row.release) {
+      const n = s.native || {};
+      lines.push('结束后 ' + s.sec + ' 秒：PSS ' + fmtKb(n.totalPssKb) + '，RSS ' + fmtKb(n.rssKb) + '，主线程 JS ' + (s.js ? fmtBytes(s.js.used) : '—'));
+    }
+  }
+  return lines.filter(Boolean).join('\n');
 }
 
 function reportText() {
-  const head = ['闪电看图安卓验证', deviceLines(), buildLines(), '专用转换线程：' + (window.__peek.dedicatedWasm ? '开' : '关')].join('\n');
-  if (!runs.length) return head + '\n\n还没有打开过图纸。';
-  return head + '\n\n' + runs.map((r, i) => runText(r, i)).join('\n\n');
+  const head = ['闪电看图安卓验证', deviceLines(), buildLines(), '专用转换线程：' + (window.__peek.dedicatedWasm ? '开' : '关')];
+  if (bootError) head.push('wasm 启动失败：' + bootError);
+  if (incomingError) head.push('外部打开失败：' + incomingError);
+  if (crashed) head.push('上次没开完就退出了：' + (crashed.name || '') + '（' + fmtBytes(crashed.bytes) + '，' + (crashed.dedicated ? '专用转换' : '普通') + '）');
+  if (!runs.length) return head.join('\n') + '\n\n还没有打开过图纸。';
+  return head.join('\n') + '\n\n' + runs.map((r, i) => runText(r, i)).join('\n\n');
 }
 
 function render() {
   const pre = document.querySelector('#peek-probe .meta');
   const box = document.querySelector('#peek-probe textarea');
-  if (pre) pre.textContent = deviceLines() + '\n' + buildLines() + (current ? '\n正在打开 ' + current.name + '…' : '');
+  if (pre) pre.textContent = [deviceLines(), buildLines(), bootError && ('wasm 启动失败：' + bootError), incomingError && ('外部打开失败：' + incomingError), crashed && ('上次没开完：' + (crashed.name || '')), current && ('正在打开 ' + current.name + '…')].filter(Boolean).join('\n');
   if (box && document.activeElement !== box) box.value = reportText();
 }
 
@@ -216,10 +261,9 @@ function mount() {
   const box = root.querySelector('textarea');
   const dedicated = root.querySelector('#peek-dedicated');
   dedicated.checked = !!window.__peek.dedicatedWasm;
-  dedicated.onchange = () => {
+    dedicated.onchange = () => {
     window.__peek.dedicatedWasm = dedicated.checked;
     try { localStorage.setItem('peek.dedicated', JSON.stringify(dedicated.checked)); } catch (e) { /* 忽略 */ }
-    if (window.__peekResetWorker) window.__peekResetWorker();
     render();
   };
   root.querySelector('#peek-fold').onclick = () => {
@@ -241,11 +285,11 @@ function mount() {
 }
 
 async function openBundled(name) {
+  const t = performance.now();
   const r = await fetch('samples/' + name);
   if (!r.ok) throw new Error('样图不在包里：' + name);
   const bytes = new Uint8Array(await r.arrayBuffer());
-  window.__peek.on('read-start', { name, bytes: bytes.byteLength });
-  window.__peek.on('read-end', { name, bytes: bytes.byteLength, ms: 0 });
+  window.__peek.read = { name, bytes: bytes.byteLength, ms: performance.now() - t };
   const openBytes = window.__sdkt && window.__sdkt.openBytes;
   if (!openBytes) throw new Error('页面还没准备好');
   await openBytes(name, bytes, null);
@@ -284,11 +328,111 @@ async function loadDevice() {
   render();
 }
 
+function remember(row) {
+  runs.unshift(row);
+  if (runs.length > 3) runs.pop();
+  try { localStorage.setItem('peek.runs', JSON.stringify(runs)); } catch (e) { /* 忽略 */ }
+  try { localStorage.removeItem('peek.inflight'); } catch (e) { /* 忽略 */ }
+  crashed = null;
+}
+function scheduleRelease(row) {
+  for (const sec of [2, 10, 30]) {
+    setTimeout(async () => {
+      const snap = { sec, js: jsHeap(), native: null };
+      try { snap.native = await nativeCall('getMemory'); } catch (e) { snap.err = String(e && e.message || e); }
+      row.release = row.release || [];
+      row.release.push(snap);
+      try { localStorage.setItem('peek.runs', JSON.stringify(runs)); } catch (e) { /* 忽略 */ }
+      render();
+    }, sec * 1000);
+  }
+}
+async function wrappedOpen(orig, name, bytes, path, opt) {
+  if (opt && opt.hidden) return orig(name, bytes, path, opt);
+  const read = window.__peek.read;
+  window.__peek.read = null;
+  const row = {
+    name: (read && read.name) || name,
+    bytes: (read && read.bytes) || (bytes && bytes.byteLength) || 0,
+    readMs: read ? read.ms : null,
+    dedicated: !!window.__peek.dedicatedWasm,
+  };
+  row.t0 = read && read.ms ? performance.now() - read.ms : performance.now();
+  try { localStorage.setItem('peek.inflight', JSON.stringify({ name: row.name, bytes: row.bytes, dedicated: row.dedicated, t: Date.now() })); } catch (e) { /* 忽略 */ }
+  current = row;
+  startSampling();
+  render();
+  try {
+    const tCall = performance.now();
+    const doc = await orig(name, bytes, path, opt);
+    row.afterOpen = performance.now();
+    row.openCallMs = row.afterOpen - tCall;
+    if (!doc) { row.error = '没有打开'; row.totalMs = performance.now() - row.t0; }
+    else {
+      row.info = (doc.scene && doc.scene.info) || {};
+      await new Promise((res) => requestAnimationFrame(() => requestAnimationFrame(res)));
+      row.paintAt = performance.now();
+      row.paintMs = row.paintAt - row.afterOpen;
+      row.prepMs = Math.max(0, row.openCallMs - (row.info.dwgMs || 0) - (row.info.parseMs || 0));
+      row.totalMs = row.paintAt - row.t0;
+    }
+    row.peak = { ...peak };
+    current = null;
+    await stopSampling();
+    row.peak = { ...peak, otherCount: peak.last && peak.last.otherCount, otherRssKb: peak.last && peak.last.otherRssKb, otherNote: peak.last && peak.last.otherNote };
+    remember(row);
+    render();
+    if (row.dedicated) scheduleRelease(row);
+    return doc;
+  } catch (err) {
+    row.error = String(err && err.message || err);
+    row.totalMs = performance.now() - row.t0;
+    row.peak = { ...peak };
+    current = null;
+    await stopSampling();
+    remember(row);
+    render();
+    throw err;
+  }
+}
+function wrapApi() {
+  const api = window.__sdkt;
+  if (!api || !api.openBytes || api.openBytes.__peekWrapped) return !!(api && api.openBytes && api.openBytes.__peekWrapped);
+  const orig = api.openBytes;
+  const wrapped = function (name, bytes, path, opt) { return wrappedOpen(orig, name, bytes, path, opt); };
+  wrapped.__peekWrapped = true;
+  api.openBytes = wrapped;
+  return true;
+}
+function armWrap() {
+  if (wrapApi()) return;
+  const t0 = performance.now();
+  const tick = () => { if (!wrapApi() && performance.now() - t0 < 10000) requestAnimationFrame(tick); };
+  requestAnimationFrame(tick);
+}
+const NativeWorker = window.Worker;
+window.Worker = function (url, opts) {
+  const w = new NativeWorker(url, opts);
+  const origPost = w.postMessage.bind(w);
+  w.postMessage = (msg, transfer) => {
+    if (msg && msg.cmd === 'open' && window.__peek && window.__peek.dedicatedWasm) msg = Object.assign({}, msg, { dedicatedWasm: true });
+    return origPost(msg, transfer);
+  };
+  w.addEventListener('message', (e) => {
+    if (e.data && e.data.bootError) { bootError = e.data.bootError; render(); }
+  });
+  return w;
+};
 async function takeIncoming() {
   try {
     const file = await nativeCall('takePendingFile');
     if (file && file.path) emitOpen(file.path);
-  } catch (e) { /* 没有待打开的文件 */ }
+  } catch (e) {
+    const msg = String(e && e.message || e);
+    if (/没有原生桥|未实现/.test(msg)) return;
+    incomingError = msg;
+    render();
+  }
 }
 window.__peekIncoming = () => { takeIncoming(); };
 
@@ -300,10 +444,7 @@ whenReady(() => {
   mount();
   loadBuildInfo();
   loadDevice();
-  // app.js 在本模块之后执行，等它挂上 __sdkt 再收「用其他应用打开」
-  const wait = setInterval(() => {
-    if (window.__sdkt && window.__sdkt.openBytes) { clearInterval(wait); takeIncoming(); }
-  }, 200);
-  setTimeout(() => clearInterval(wait), 20000);
+  takeIncoming();
+  armWrap();
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') takeIncoming(); });
 });

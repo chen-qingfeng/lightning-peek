@@ -13,7 +13,8 @@
     "pack:portable": "bash build/pack-portable.sh",
     "phone": "node tools/serve-phone.mjs",
     "android:www": "node tools/sync-android-www.mjs",
-    "android:www:small": "node tools/sync-android-www.mjs --pages 1024"
+    "android:www:small": "node tools/sync-android-www.mjs --pages 1024",
+    "test:wasm-grow": "node tools/wasm-grow-check.mjs"
   },
   "devDependencies": {
     "electron": "33.2.1"

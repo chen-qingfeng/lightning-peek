@@ -4,7 +4,7 @@
 
 状态标记：`✅` 已实现（在当前版本中可用）· `🚧` 部分实现 · `📋` 规划中
 
-状态依据已发布的 v0.2.8 预览版（GitHub prerelease，安装包 LightningPeek-0.2.8-setup-x64.exe）。仓库 package.json 为 0.2.9，尚未发布。v0.1.4 已有、发布说明没有改口的勾选保持原样；「非专业人员」一行改为当前发布的安装包。新写上的只记发布说明和 CHANGELOG 里写明的内容。规划项的顺序不代表承诺的发布时间。
+状态依据已发布的 v0.2.11 预览版（GitHub prerelease，安装包 LightningPeek-0.2.11-setup-x64.exe）。仓库 package.json 为 0.2.12，尚未发布（CHANGELOG 记录：打开图纸前预加载 DWG 读取模块）。v0.1.4 已有、发布说明没有改口的勾选保持原样；「非专业人员」一行改为当前发布的安装包。新写上的只记发布说明和 CHANGELOG 里写明的内容。规划项的顺序不代表承诺的发布时间。
 
 ## 产品边界
 
@@ -22,7 +22,7 @@
 
 ## 要解决的问题
 
-| 痛点 | 现状 | 闪电看图 v0.2.8 |
+| 痛点 | 现状 | 闪电看图 v0.2.11 |
 | --- | --- | --- |
 | CAD 打开慢、卡顿 | 大图纸、外部参照多、垃圾块多，低配电脑卡死 | ✅ 不需要安装 CAD；图纸在后台线程解析，界面不卡死。外部参照自动加载显示 |
 | 图层混乱 | 命名不规范、中文乱码，构件归属分不清 | ✅ 图层开关、搜索、隔离；🚧 按代码页解码中文；📋 图层语义归类 |
@@ -31,7 +31,7 @@
 | 手动提量低效易错 | 长度、面积、个数靠框选 | ✅ 长度、框选总长、点选面积、图块计数，导出 Excel |
 | 版本混乱 | 新旧图对比靠肉眼 | ✅ 图纸对比：新增 / 删除 / 文字修改，叠加、并排、卷帘查看，导出清单 |
 | 信息缺失 | 块无属性、标高缺失、管径漏标 | 📋 图纸校核 |
-| 非专业人员看不懂 | 资料员、甲方、班组只想看结果 | ✅ 当前发布的是 Windows 安装版（LightningPeek-0.2.8-setup-x64.exe），测量结果汇总为 Excel |
+| 非专业人员看不懂 | 资料员、甲方、班组只想看结果 | ✅ 当前发布的是 Windows 安装版（LightningPeek-0.2.11-setup-x64.exe），测量结果汇总为 Excel |
 
 ## 一、查看与检索
 
@@ -47,6 +47,7 @@
 - 📋 按图框 / 图号分区浏览与统计
 - 🚧 中文编码：已按 `$DWGCODEPAGE` 解码 GBK / Big5 / Shift_JIS / EUC-KR / Windows-125x；📋 无声明时的编码嗅探与乱码修复
 - ✅ 本机字体查找与替代（v0.2.3–v0.2.8）：自动找 SHX 并互相替代，含 MONOTXT、IDQSTYLE；多行文字按图纸栏宽排开。细则见版本路线
+- ✅ AutoCAD 2007 天正文字（v0.2.9–v0.2.11）：从对象里读出并用自带中文绘制；做法说明在引线右侧按原图坐标逐行排列。细则见版本路线
 - 📋 炸碎文字聚合（相邻同高文字合并为整句）
 
 ## 二、工程量提取
@@ -112,7 +113,7 @@
 
 ### v0.2.3 – v0.2.8 — 已发布的预览版：字体与栏宽
 
-当前已发布版本是 v0.2.8 预览版，安装包 LightningPeek-0.2.8-setup-x64.exe。v0.2.3、v0.2.4、v0.2.5、v0.2.7、v0.2.8 都是 GitHub prerelease。没有 v0.2.6 的预发布；多行说明的栏宽写在 CHANGELOG 的 0.2.6，并包含在 v0.2.7 的发布说明里。
+v0.2.3、v0.2.4、v0.2.5、v0.2.7、v0.2.8 都是 GitHub prerelease。没有 v0.2.6 的预发布；多行说明的栏宽写在 CHANGELOG 的 0.2.6，并包含在 v0.2.7 的发布说明里。
 
 | 目标 | 状态 |
 | --- | --- |
@@ -121,11 +122,21 @@
 | 多行文字按图纸栏宽排开 | ✅ v0.2.7。多行说明和表格格子停在文字框里，不压到旁边一栏。原来的单线字改用自带字体时，单行标注也按原来的行宽画 |
 | 天正、国标字体按名字替代 | ✅ v0.2.8。gbhzfs.shx 按汉字大字体找（hztxt.shx、gbcbig.shx），gbxwxt.shx、superos.shx 按西文找。有 simplex.shx 时不再拿它去顶汉字大字体。缺的字仍用自带中文 |
 | AutoCAD 2007 说明文字从两段中间切开 | ✅ v0.2.8 把汉字接回去 |
-| AutoCAD 2007 天正自定义对象（坐标、引出、图名） | v0.2.8 的发布说明写明这一版仍然读不出来。仓库里的 0.2.9 尚未发布；CHANGELOG 有对应记录，不能当作已发布功能 |
+| AutoCAD 2007 天正自定义对象（坐标、引出、图名） | v0.2.8 的发布说明写明这一版仍然读不出来。自 v0.2.9 起，天正文字可从对象里读出，见下一节 |
+
+### v0.2.9 – v0.2.11 — 已发布的预览版：AutoCAD 2007 天正文字
+
+当前已发布版本是 v0.2.11 预览版，安装包 LightningPeek-0.2.11-setup-x64.exe。v0.2.9、v0.2.10、v0.2.11 都是 GitHub prerelease。仓库 package.json 为 0.2.12，尚未发布。
+
+| 版本 | 已发布的内容 |
+| --- | --- |
+| v0.2.9 | AutoCAD 2007 的天正文字从对象里读出来，用软件自带的中文来画。暖气竣工图里的管线说明、剖面做法、断面编号可以显示。不附带天正字体文件 |
+| v0.2.10 | 天正做法说明改到引线的文字那一端，并补上引线。上一版把字放在了箭头尖上，所以说明叠进了做法大样里。引出标注的折线同样补上 |
+| v0.2.11 | 天正做法说明改到引线右侧，按原图坐标逐行排列。箭头点和离箭头最近的那一行都用图纸里记的坐标；竖线从箭头连到最上面一行，每一行有一条短横线，文字写在短横线外侧 |
 
 ### 之后
 
-Windows 安装程序已随预览版发布（LightningPeek-x.y.z-setup-x64.exe）。仍在其后：代码签名、macOS / Linux 安装包、线宽显示、更多 DWG 版本的兼容性测试，以及上面的「图纸校核」和「AI 辅助」。
+Windows 安装程序已随预览版发布（LightningPeek-x.y.z-setup-x64.exe）。仍在其后：代码签名、macOS / Linux 安装包、线宽显示、更多 DWG 版本的兼容性测试，以及上面的「图纸校核」和「AI 辅助」。仓库里的 0.2.12（打开前预加载 DWG 读取模块）尚未发布。
 
 ---
 
@@ -133,10 +144,12 @@ Windows 安装程序已随预览版发布（LightningPeek-x.y.z-setup-x64.exe）
 
 Lightning Peek does two things: open DWG/DXF drawings quickly and make what is in them easy to find and check. It is not a CAD editor, a BIM or 3D tool, a replacement for professional quantity take-off software, and it never modifies the original drawing.
 
-The current published prerelease is v0.2.8. Its installer is LightningPeek-0.2.8-setup-x64.exe. package.json in the repository is 0.2.9, and that version has no GitHub release. There is no v0.2.6 prerelease.
+The current published prerelease is v0.2.11. Its installer is LightningPeek-0.2.11-setup-x64.exe. package.json in the repository is 0.2.12, and that version has no GitHub release. There is no v0.2.6 prerelease.
 
-Available since v0.1.4 and still in v0.2.8: opening DWG/DXF, layer on/off/search/isolate, block counts, lengths, areas (including picked areas with islands), text search with location, Excel export, a measurement disclaimer, and two-drawing comparison.
+Available since v0.1.4 and still in v0.2.11: opening DWG/DXF, layer on/off/search/isolate, block counts, lengths, areas (including picked areas with islands), text search with location, Excel export, a measurement disclaimer, and two-drawing comparison.
 
-Shipped after v0.1.4 and in the v0.2.8 prerelease: the Windows setup installer LightningPeek-x.y.z-setup-x64.exe; automatic SHX and font lookup and substitution, including MONOTXT and IDQSTYLE; multiline text kept inside the column width set on the drawing. The v0.1.5–v0.2.2 prereleases also shipped a bundled Chinese font (Noto Sans SC), an optional local font folder, phone viewing in a browser, TArch annotations on AutoCAD 2000–2004 drawings, steel-bar grade marks, coordinate labels split on ^M^J and ^J, and model/layout tabs (Layout1 shown as 布局1). v0.2.8 still does not read Tianzheng's own coordinate, leader and drawing-name objects in AutoCAD 2007 files. CHANGELOG records that under 0.2.9, which is not released.
+Shipped after v0.1.4 and still in the v0.2.11 prerelease: the Windows setup installer LightningPeek-x.y.z-setup-x64.exe; automatic SHX and font lookup and substitution, including MONOTXT and IDQSTYLE; multiline text kept inside the column width set on the drawing. The v0.1.5–v0.2.2 prereleases also shipped a bundled Chinese font (Noto Sans SC), an optional local font folder, phone viewing in a browser, TArch annotations on AutoCAD 2000–2004 drawings, steel-bar grade marks, coordinate labels split on ^M^J and ^J, and model/layout tabs (Layout1 shown as 布局1).
+
+Shipped in v0.2.9–v0.2.11: AutoCAD 2007 Tianzheng text is read from the object and drawn with the built-in Chinese font; construction notes sit to the right of the leader, laid out line by line at the original drawing coordinates, with the leader line drawn. package.json 0.2.12 (preload the DWG reader before a drawing is opened) is not released.
 
 Planned: WebGL rendering for very large drawings, attribute extraction, structured search by specification, text re-assembly, layer classification, drawing checks (conflicting or missing dimensions, elevation conflicts), and optional AI assistance (natural-language questions, component recognition). AI features will be off by default and will state clearly where data goes.

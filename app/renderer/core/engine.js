@@ -1,5 +1,6 @@
 // 闪电看图 · 几何引擎
 import { parseOleFrame } from './ole.js';
+import { unescapeDxfText, repairMojibake, looksBrokenText } from './textRepair.js';
 // DXF 文本 → 文档结构 → 场景（按样式合批的绘图指令、文字、捕捉点、圆弧表）
 // 所有输出坐标都是“局部坐标”= 世界坐标 − 原点，避免大坐标在画布里丢精度。
 
@@ -36,7 +37,9 @@ function aciToRgb(i) { return i === 7 ? FG : ACI[i] ?? FG; }
 export function decodeDxfBytes(bytes) { return decodeDxf(bytes).text; }
 export function decodeDxf(bytes) {
   const r = decodeDxfInner(bytes);
-  return typeof r === 'string' ? { text: r, enc: 'utf-8' } : r;
+  // codepageDeclared：字节确实按文件头里的非 UTF 代码页解开。合法 UTF-8 即使头上仍写 ANSI_936 也是 false。
+  if (typeof r === 'string') return { text: r, enc: 'utf-8', codepageDeclared: false };
+  return { text: r.text, enc: r.enc, codepageDeclared: !!r.codepageDeclared };
 }
 const CP_MAP = { ANSI_936: 'gbk', ANSI_950: 'big5', ANSI_932: 'shift_jis', ANSI_949: 'euc-kr', ANSI_1252: 'windows-1252', ANSI_1251: 'windows-1251', ANSI_1250: 'windows-1250' };
 // 图纸的 ANSI 代码页（OLE 预览里的文字按它解码）
@@ -61,7 +64,7 @@ function decodeDxfInner(bytes) {
   const m = head.match(/\$DWGCODEPAGE\s*\r?\n\s*3\s*\r?\n([^\r\n]+)/);
   const cp = (m ? m[1].trim() : 'ANSI_936').toUpperCase();
   const enc = CP_MAP[cp] || 'gbk';
-  return { text: new TextDecoder(enc).decode(rejoinSplitChars(bytes, enc)), enc };
+  return { text: new TextDecoder(enc).decode(rejoinSplitChars(bytes, enc)), enc, codepageDeclared: declared };
 }
 // LibreDWG 把长 MTEXT 按 250 字节切成多段（组码 3…3,1），会把一个双字节汉字劈成两半，
 // 后面整段解码错位（例如“加盖出图章”变成“加�浅鐾…”）。把段尾落单的前导字节挪到下一段开头。
@@ -356,18 +359,25 @@ export function barStrokes(grade) {
 }
 
 // ---------- 文本清理 ----------
-export function cleanText(s) {
+// 文件头有非 UTF 的 $DWGCODEPAGE。直接 parseDxf 文本、没有解码标志时用它做守卫。
+function legacyCodepage(doc) {
+  const v = doc && doc.header && doc.header.$DWGCODEPAGE;
+  const cp = v && v[0] ? String(v[0][1]).trim() : '';
+  return !!cp && !/^utf/i.test(cp);
+}
+export function cleanText(s, opts) {
   if (!s) return '';
-  s = s.replace(/\\U\+([0-9A-Fa-f]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
-  s = s.replace(/\\M\+[0-9A-Fa-f]([0-9A-Fa-f]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  s = unescapeDxfText(s);
+  // 已按声明代码页解开的文字不再重解。%% 和 ^M^J 放在后面，避免控制字节被当成 GBK。
+  if (!opts || !opts.codepageDeclared) s = repairMojibake(s);
   s = s.replace(/%%[cC]/g, 'Ø').replace(/%%[dD]/g, '°').replace(/%%[pP]/g, '±').replace(/%%[uUoOkK]/g, '').replace(/%%%/g, '%')
     .replace(/%%(\d{3})/g, (_, d) => String.fromCharCode(+d));
   // 管立得等软件在坐标、管线标注里用 ^M^J 换行。留下这两个字符，X 和 Y 会粘在一行并多出 ^M。
   s = s.replace(/\^M\^J|\^J\^M|\^M|\^J/g, '\n').replace(/\r\n|\r/g, '\n');
   return s;
 }
-function mtextLines(raw) {
-  let s = cleanText(raw);
+function mtextLines(raw, opts) {
+  let s = cleanText(raw, opts);
   // 叠字 \Sa^b; → a/b
   s = s.replace(/\\S([^;]*?)[\^#/]([^;]*?);/g, '$1/$2');
   s = s.replace(/\\[PpNn]/g, '\n').replace(/\\~/g, ' ');
@@ -552,15 +562,17 @@ export function buildScene(doc, opts = {}) {
 
   if (opts.origin) { ox = opts.origin[0]; oy = opts.origin[1]; }
   const out = [];
-  const stats = { entities: 0, skipped: {} };
+  const stats = { entities: 0, skipped: {}, brokenText: 0 };
+  const textOpts = { codepageDeclared: opts.codepageDeclared != null ? !!opts.codepageDeclared : legacyCodepage(doc) };
   for (const sp of [...spaces.values()].sort((a, b) => a.order - b.order)) {
     // 布局里暂时没有图元也保留。藏掉空布局后，只剩模型空间，左下角的「模型 / 布局」整条都不画。
     const sink = opts.sinkFactory ? opts.sinkFactory(sp) : new SceneSink();
     const o = sp.paper ? [0, 0] : [ox, oy];
     const root = [1, 0, 0, 1, -o[0], -o[1]];
-    const ctx = { doc, sink, ltscale, stats, viewports: [], oles: [], xrefs: [], depth: 0 };
+    const ctx = { doc, sink, ltscale, stats, viewports: [], oles: [], xrefs: [], depth: 0, textOpts };
     walk(ctx, sp.ents, root, { layer: '0', color: FG, ltype: 'CONTINUOUS' });
     const res = sink.finish();
+    for (const t of res.texts) if (looksBrokenText(t.s)) stats.brokenText++;
     res.key = sp.key; res.name = sp.name; res.paper = sp.paper; res.origin = o;
     res.viewports = ctx.viewports;
     if (sp.paper) resolveClips(sp.ents, res.viewports);
@@ -1008,7 +1020,7 @@ function emitInsert(ctx, r, m, inh, attribs) {
 }
 
 function emitText(ctx, r, m, s) {
-  const lines = cleanText(r.raw(1)).replace(/\s+$/, '').split('\n').map(t => t.replace(/\s+$/, ''));
+  const lines = cleanText(r.raw(1), ctx.textOpts).replace(/\s+$/, '').split('\n').map(t => t.replace(/\s+$/, ''));
   while (lines.length > 1 && !lines[lines.length - 1]) lines.pop();
   if (!lines.some(t => t)) return;
   const doc = ctx.doc;
@@ -1070,7 +1082,7 @@ function emitMText(ctx, r, m, s) {
   let raw = '';
   for (let j = 0; j < r.c.length; j++) if (r.c[j] === 3) raw += r.v[j];
   raw += r.raw(1);
-  const lines = mtextLines(raw);
+  const lines = mtextLines(raw, ctx.textOpts);
   const h = r.f(40, 2.5);
   const att = r.i(71, 1);
   let rot = r.f(50, 0);

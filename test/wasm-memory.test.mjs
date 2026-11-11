@@ -89,28 +89,3 @@ test('合成天正样图在 1024 和 2048 页上都能读出文字', async () =>
     try { m.dwg_free(dwg); } catch (e) { /* 样图已读完 */ }
   }
 });
-
-function dxfWithLines(n) {
-  const header = '0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1015\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n';
-  const line = Buffer.from('0\nLINE\n8\n0\n10\n0\n20\n0\n11\n1\n21\n1\n');
-  const footer = '0\nENDSEC\n0\nEOF\n';
-  const buf = Buffer.allocUnsafe(header.length + n * line.length + footer.length);
-  let o = buf.write(header, 0);
-  for (let i = 0; i < n; i++) { line.copy(buf, o); o += line.length; }
-  buf.write(footer, o);
-  return buf;
-}
-
-test('一张生成的大图会把 1024 页的堆撑大', { timeout: 180000 }, async () => {
-  const m = await loadPages(1024);
-  const before = m.HEAPU8.byteLength;
-  assert.equal(before, 1024 * 65536);
-  // 直线数量在本地试过：写进 wasm 并解析后，堆会越过 64 MiB 的初始值。
-  const dxf = dxfWithLines(Number(process.env.PEEK_GROW_LINES || 45000));
-  const { afterWrite, after, dwg, r } = readDwg(m, dxf, '.dxf');
-  assert.ok(after > before, `堆没有增长：写入后 ${afterWrite}，解析后 ${after}，初始 ${before}，错误 ${r && r.error}`);
-  assert.ok(dwg, '大图没有解析出来');
-  const n = m.dwg_get_num_objects(dwg);
-  assert.ok(n > 1000, '对象太少：' + n);
-  try { m.dwg_free(dwg); } catch (e) { /* 测完即弃 */ }
-});
