@@ -1,0 +1,11 @@
+{
+  "appId": "app.lightningpeek.shell",
+  "appName": "闪电看图",
+  "webDir": "www",
+  "android": {
+    "path": "android"
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

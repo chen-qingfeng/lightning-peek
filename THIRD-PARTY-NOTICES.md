@@ -8,6 +8,7 @@ Lightning Peek includes or depends on the following software. Full license texts
 | [libredwg-web](https://github.com/mlightcad/libredwg-web) (WebAssembly build of LibreDWG, by mlightcad) | 0.8.6 | GPL-3.0 | `app/renderer/lib/libredwg-web.js`, `.wasm`; license text in `app/renderer/lib/LibreDWG-COPYING.txt` |
 | [Noto Sans SC](https://fonts.google.com/noto/specimen/Noto+Sans+SC) (Simplified Chinese subset) | regular, woff2 | SIL Open Font License 1.1 | `app/renderer/fonts/NotoSansSC-Regular.woff2`; license in `app/renderer/fonts/NotoSansSC-OFL.txt`. Copyright 2014-2021 Adobe, with Reserved Font Name “Source”. | 
 | [Electron](https://www.electronjs.org/) | 33.2.1 | MIT | Windows package runtime; license in `LICENSE.electron.txt` |
+| [Capacitor](https://capacitorjs.com/) | 8.6.0 | MIT | Android verification shell only (`mobile/`). Not part of the desktop app. |
 | Chromium and its dependencies (bundled with Electron) | as shipped with Electron 33.2.1 | Various open-source licenses | Windows package; see `LICENSES.chromium.html` |
 
 Not bundled:

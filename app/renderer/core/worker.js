@@ -1,16 +1,26 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
 import { extractTch, tchBuild, tchMarkup, TCH_CLASSES, orientTch } from './tarch.js';
+import { convertInChild, jsMem, wasmBytesOf } from './dwg-host.js';
 
 let wasm = null;
 let booting = null;
+let lastCompileMs = 0;
+const workerStarted = performance.now();
+let runIndex = 0;
+// 安卓验证壳可让每张图在单独的 Worker 里转换，转完就终止，好把 wasm 堆还给系统。
+// 桌面版不带 ?dedicated=1，行为与原来一样：转换后丢掉模块并立刻再准备一份。
+const dedicatedMode = new URL(import.meta.url).searchParams.get('dedicated') === '1';
+let reuseWasm = !dedicatedMode;
 // 读图模块单独准备。编译放在打开之前，不改后面的解析和画图。
 function bootWasm() {
   if (wasm) return Promise.resolve(wasm);
   if (!booting) {
     booting = (async () => {
+      const tBoot = performance.now();
       const mod = (await import('../lib/libredwg-web.js')).default;
       const m = await mod({ locateFile: (f) => new URL('../lib/' + f, import.meta.url).href });
+      lastCompileMs = performance.now() - tBoot;
       wasm = m;
       booting = null;
       return m;
@@ -21,13 +31,14 @@ function bootWasm() {
 function lib() { return bootWasm(); }
 function retireWasm() {
   wasm = null;
-  bootWasm().catch(() => {});
+  if (reuseWasm) bootWasm().catch(() => {});
 }
 const docs = new Map();
 
 const wasmTrap = e => /memory access out of bounds|^Aborted\(/.test(String(e && e.message || e));
 function dwgToDxf(m, bytes) {
   const inF = '/in_' + Date.now() + '.dwg', outF = inF.replace('.dwg', '.dxf');
+  const wasmBefore = m.HEAPU8 ? m.HEAPU8.byteLength : 0;
   m.FS.writeFile(inF, bytes);
   let dwg = 0;
   try {
@@ -47,7 +58,9 @@ function dwgToDxf(m, bytes) {
       const mode = ver === 'AC1015' || ver === 'AC1018' ? 1 : ver === 'AC1021' ? 2 : 0;
       if (wasm) { try { tch = extractTch(m, dwg, hex, mode); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
     }
-    return { bytes: out, warn: err, oles, tch };
+    const wasmBytes = m.HEAPU8 ? m.HEAPU8.byteLength : wasmBefore;
+    // 非专用模式在 finally 里立刻再 boot，旧模块要等这次调用结束才能被回收。
+    return { bytes: out, warn: err, oles, tch, wasmBefore, wasmBytes, wasmOverlap: !!reuseWasm, jsAfter: jsMem() };
   } finally {
     // 写某些图（例如这张 AC1015 天正图）的 DXF 时，LibreDWG 会把 wasm 堆写坏，
     // 下一张图再读就变成 memory access out of bounds。DXF 已经复制出来，丢掉整个模块。
@@ -164,20 +177,36 @@ function collect(scene, list = []) {
   return list;
 }
 
-async function open(id, name, bytes) {
+function memSnap(wasmBytes) {
+  return { js: jsMem(), wasm: wasmBytes, t: Math.round(performance.now()) };
+}
+async function open(id, name, bytes, opt = {}) {
+  runIndex += 1;
   const t0 = performance.now();
+  const dedicated = !!(opt.dedicatedWasm || dedicatedMode);
+  const hadWasm = !!wasm;
+  const memBefore = memSnap(wasmBytesOf(wasm));
   const lower = name.toLowerCase();
   let dxfBytes = bytes, warn = 0, version = '', oles = null, tch = null;
+  let dwgMs = 0, wasmBefore = 0, wasmBytes = 0, wasmOverlap = false, jsAfterConvert = null, compileMs = 0;
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
-    const m = await lib();
-    const r = dwgToDxf(m, bytes);
-    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
+    const tA = performance.now();
+    if (dedicated && !dedicatedMode) { wasm = null; booting = null; }
+    const r = dedicated ? await convertInChild(bytes) : await (async () => { const m = await lib(); compileMs = hadWasm ? 0 : lastCompileMs; return dwgToDxf(m, bytes); })();
+    dwgMs = performance.now() - tA;
+    dxfBytes = r.bytes instanceof ArrayBuffer ? new Uint8Array(r.bytes) : r.bytes;
+    warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
+    wasmBefore = r.wasmBefore || 0; wasmBytes = r.wasmBytes || 0; wasmOverlap = !!r.wasmOverlap; jsAfterConvert = r.jsAfter || null;
+    compileMs = dedicated ? (r.compileMs || 0) : (hadWasm ? 0 : lastCompileMs);
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
   }
+  const memAfterConvert = memSnap(wasmBytes || wasmBytesOf(wasm));
+  if (jsAfterConvert) memAfterConvert.js = jsAfterConvert;
   post({ id, progress: '正在解析图元…' });
+  const tB = performance.now();
   const decoded = decodeDxf(dxfBytes);
   const text = decoded.text, enc = decoded.enc, codepageDeclared = !!decoded.codepageDeclared;
   const doc = parseDxf(text);
@@ -188,8 +217,15 @@ async function open(id, name, bytes) {
   const scene = buildScene(doc, { codepageDeclared });
   for (const [k, v] of Object.entries(tchSkipped(tch))) scene.stats.skipped[k] = v;
   const t2 = performance.now();
+  const memAfterParse = memSnap(wasmBytesOf(wasm) || wasmBytes);
   docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch });
-  scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts };
+  scene.info = {
+    version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts,
+    dwgMs: Math.round(dwgMs), parseMs: Math.round(t2 - tB),
+    wasmBefore, wasmBytes, wasmGrew: wasmBytes > wasmBefore, wasmOverlap,
+    wasmCompileMs: Math.round(compileMs), workerAgeMs: Math.round(performance.now() - workerStarted), runIndex,
+    mem: { before: memBefore, afterConvert: memAfterConvert, afterParse: memAfterParse },
+  };
   return scene;
 }
 function textOf(D) { return decodeDxf(D.bytes).text; }
@@ -363,12 +399,19 @@ function filterRegion(text, bb) {
   return out.join('\r\n');
 }
 function post(m, t) { self.postMessage(m, t || []); }
-bootWasm().catch(() => {});
+if (!dedicatedMode) bootWasm().catch((e) => post({ bootError: String(e && e.stack || e.message || e) }));
 self.onmessage = async (e) => {
   const { id, cmd } = e.data;
   try {
-    if (cmd === 'open') {
-      const scene = await open(id, e.data.name, new Uint8Array(e.data.bytes));
+    if (cmd === 'convert-only') {
+      reuseWasm = false;
+      const m = await lib();
+      const r = dwgToDxf(m, new Uint8Array(e.data.bytes));
+      const payload = { bytes: r.bytes, warn: r.warn, oles: r.oles, tch: r.tch, wasmBefore: r.wasmBefore, wasmBytes: r.wasmBytes, wasmOverlap: false, jsAfter: r.jsAfter, compileMs: lastCompileMs };
+      const transfers = r.bytes && r.bytes.buffer ? [r.bytes.buffer] : [];
+      post({ id, ok: true, result: payload }, transfers);
+    } else if (cmd === 'open') {
+      const scene = await open(id, e.data.name, new Uint8Array(e.data.bytes), { dedicatedWasm: !!e.data.dedicatedWasm });
       post({ id, ok: true, scene }, collect(scene));
     } else if (cmd === 'compare') {
       const r = compare(e.data.a, e.data.b, e.data.opts || {});

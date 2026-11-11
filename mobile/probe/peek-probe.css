@@ -1,0 +1,64 @@
+/* 安卓验证壳的计时面板。只存在于 mobile/www 的复制结果里，不改桌面版样式。 */
+#peek-probe {
+  position: fixed;
+  z-index: 80;
+  right: 8px;
+  bottom: calc(8px + env(safe-area-inset-bottom));
+  width: min(92vw, 340px);
+  max-height: min(46vh, 360px);
+  overflow: auto;
+  background: rgba(29, 42, 58, .94);
+  color: #e8eef6;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .35);
+  font-size: 12px;
+  line-height: 1.45;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: auto;
+}
+#peek-probe * { user-select: text; -webkit-user-select: text; }
+#peek-probe header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  position: sticky;
+  top: 0;
+  background: #1d2a3a;
+}
+#peek-probe header strong { flex: 1; font-size: 13px; }
+#peek-probe header button, #peek-probe .row button {
+  background: #ffc531;
+  color: #1d2a3a;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-weight: 600;
+}
+#peek-probe .body { padding: 0 8px 8px; }
+#peek-probe.collapsed .body { display: none; }
+#peek-probe .meta { color: #c5d0de; white-space: pre-wrap; word-break: break-all; }
+#peek-probe label { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0; }
+#peek-probe textarea {
+  width: 100%;
+  height: 72px;
+  margin-top: 6px;
+  font: 11px/1.4 ui-monospace, monospace;
+  color: #1f2733;
+  background: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px;
+}
+#peek-probe .samples { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+#peek-probe .samples button {
+  background: #2f6fde;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font: inherit;
+}
+#peek-probe .err { color: #ffb4b4; }

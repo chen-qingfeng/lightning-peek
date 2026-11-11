@@ -1,0 +1,74 @@
+# 只在验证分支上打调试 APK。不签名发布，不用密钥库文件。
+name: 安卓验证包
+
+on:
+  push:
+    branches: [experiment/android-capacitor]
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: 安装 Android SDK
+        run: |
+          mkdir -p "$HOME/android-sdk/cmdline-tools"
+          curl -fsSL -o /tmp/cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          rm -rf /tmp/cmdtools
+          unzip -q /tmp/cmdtools.zip -d /tmp/cmdtools
+          rm -rf "$HOME/android-sdk/cmdline-tools/latest"
+          mv /tmp/cmdtools/cmdline-tools "$HOME/android-sdk/cmdline-tools/latest"
+          echo "ANDROID_HOME=$HOME/android-sdk" >> "$GITHUB_ENV"
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$HOME/android-sdk/platform-tools" >> "$GITHUB_PATH"
+
+      - name: 安装编译需要的平台
+        run: |
+          set +o pipefail
+          yes | sdkmanager --sdk_root="$ANDROID_HOME" --licenses >/dev/null
+          sdkmanager --sdk_root="$ANDROID_HOME" --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: 安装壳的依赖
+        working-directory: mobile
+        run: npm ci
+
+      - name: 复制网页
+        run: node tools/sync-android-www.mjs --pages 1024
+
+      - name: 同步到安卓工程
+        working-directory: mobile
+        run: npx cap sync android
+
+      - name: 写上本机 SDK 路径
+        run: echo "sdk.dir=$ANDROID_HOME" > mobile/android/local.properties
+
+      - name: 打调试包
+        working-directory: mobile/android
+        run: chmod +x ./gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 整理 APK 文件名
+        run: |
+          src=$(find mobile/android/app/build/outputs/apk/debug -name '*.apk' | head -1)
+          test -n "$src"
+          cp "$src" "LightningPeek-0.2.15-android.1-debug.apk"
+
+      - name: 上传调试包
+        uses: actions/upload-artifact@v4
+        with:
+          name: LightningPeek-0.2.15-android.1-debug
+          path: LightningPeek-0.2.15-android.1-debug.apk
+          if-no-files-found: error

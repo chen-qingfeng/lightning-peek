@@ -223,7 +223,13 @@ $('#file-input').onchange = async (e) => { for (const f of e.target.files) await
 async function openFileObj(f) {
   const p = B.pathForFile ? B.pathForFile(f) : '';
   if (p) return openPath(p);
-  return openBytes(f.name, new Uint8Array(await f.arrayBuffer()), null);
+  let bytes;
+  const tRead = performance.now();
+  try { bytes = new Uint8Array(await f.arrayBuffer()); }
+  catch (err) { toast(tr('打开失败：') + (err && err.message || err)); throw err; }
+  if (window.__peek) window.__peek.read = { name: f.name, bytes: bytes.byteLength, ms: performance.now() - tRead };
+  const open = (window.__sdkt && window.__sdkt.openBytes) || openBytes;
+  return open(f.name, bytes, null);
 }
 async function openPath(p) {
   const exist = state.docs.find(d => d.path === p && d.kind === 'drawing');
@@ -231,10 +237,12 @@ async function openPath(p) {
   busy(tr('正在读取文件…'));
   try {
     const bytes = await B.readFile(p);
-    return await openBytes(p.split(/[\\/]/).pop(), bytes, p);
+    const open = (window.__sdkt && window.__sdkt.openBytes) || openBytes;
+    return await open(p.split(/[\\/]/).pop(), bytes, p);
   } catch (err) { busy(); toast(tr('打开失败：') + err.message); }
 }
 async function openBytes(name, bytes, path, opt = {}) {
+  if (/\.dwl2?$/i.test(name)) { toast(tr('这是 CAD 打开图纸时留下的锁文件（.dwl），不是图纸。请改选同名的 .dwg。'), 8000); return; }
   if (!/\.(dwg|dxf)$/i.test(name)) { toast(tr('只支持 DWG / DXF 图纸')); return; }
   busy(tr('闪电打开 ') + name + '…');
   const t0 = performance.now();
@@ -254,7 +262,12 @@ async function openBytes(name, bytes, path, opt = {}) {
     if (!opt.hidden) { state.docs.push(doc); activate(doc); addRecent(path, name); if (xrefList(doc).length) setTimeout(() => loadXrefs(doc), 0); }
     busy();
     const sk = Object.entries(sc.stats.skipped).filter(([k]) => !/^(ATTDEF|SEQEND)$/.test(k));
-    if (!opt.hidden && sc.stats.entities === 0) { toast(tr('这张图纸里没有可显示的图元'), 5000); return doc; }
+    if (!opt.hidden && sc.stats.entities === 0) {
+      const blank = tr('这张图打开了，但没有能显示的线条。管立得、天正原图请先在 CAD 里导出 T3，或另存为 DXF。');
+      toast(blank, 12000);
+      $('#st-tool').textContent = blank;
+      return doc;
+    }
     if (!opt.hidden) toast(tr('闪电打开 {0}　{1}　{2} 个图元　用时 {3} 秒', name, sc.info.version, sc.stats.entities.toLocaleString(), (doc.openMs / 1000).toFixed(2)) + (sk.length ? tr('　（{0} 暂不显示）', sk.map(([k, v]) => k + '×' + v).join('，')) : '') + (doc.unit.uf !== 1 ? tr('　测量单位：1 图纸单位 = {0} mm（{1}，可点状态栏的比例修改）', +doc.unit.uf.toFixed(4), tr(UNIT_WHY[doc.unit.why] || '')) : '') + fontNote, 7000);
     return doc;
   } catch (err) { busy(); toast(tr('打开失败：') + err.message, 6000); console.error(err); }

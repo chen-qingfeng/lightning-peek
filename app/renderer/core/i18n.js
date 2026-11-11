@@ -549,7 +549,9 @@ export const EN = {
  "图纸无法解析。可以在 CAD 软件里另存为 DXF 后再试，并欢迎反馈这张图纸的情况": "The drawing could not be read. Save it as DXF in your CAD software and try again, and consider reporting the problem.",
  "暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF": "Binary DXF is not supported yet. Save the drawing as an ASCII DXF in your CAD software.",
  "批注无法保存到图纸所在的文件夹（可能是只读位置）。本次的测量和批注只在程序打开期间有效，可用「导出标注」另存一份": "Markups could not be saved next to the drawing (the folder may be read-only). They will last only until you close the app; use Export markups to keep a copy.",
- "这张图纸里没有可显示的图元": "This drawing has nothing to display."
+ "这张图纸里没有可显示的图元": "This drawing has nothing to display.",
+ "这是 CAD 打开图纸时留下的锁文件（.dwl），不是图纸。请改选同名的 .dwg。": "This is a lock file (.dwl) left while CAD has the drawing open, not the drawing. Choose the .dwg with the same name.",
+ "这张图打开了，但没有能显示的线条。管立得、天正原图请先在 CAD 里导出 T3，或另存为 DXF。": "The file opened, but there is nothing to draw. Export T3 from the original CAD program, or save as DXF, and try again."
 };
 function detect() {
   try { const s = localStorage.getItem('lpeek.lang'); if (s === 'zh' || s === 'en') return s; } catch (e) { /* 无存储 */ }
