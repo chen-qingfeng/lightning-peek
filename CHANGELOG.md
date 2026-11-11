@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.18] – Preview – 2026-11-11
+
+### Fixed
+- A Tianzheng multileader whose arrow is not next to its landing is skipped instead of drawn from an unconfirmed coordinate. Skipped objects stay listed as unsupported even when another object of the same class was drawn. Stored text height is unchanged; only the displayed height is one step smaller.
+
 ## [0.2.17] – Preview – 2026-11-11
 
 ### Fixed

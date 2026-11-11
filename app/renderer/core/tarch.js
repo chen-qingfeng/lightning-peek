@@ -402,10 +402,13 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     // 2007 多引线：折点后按 (Y, X) 存每个箭头端点；文字是独立的 TCH_TEXT 对象。
     const y = rdAt(bytes, nbits, 82), x = rdAt(bytes, nbits, 146), pts = [];
     if (!okPt(x, y)) return null;
+    // 只接受和承托段连得上的箭头。对不上就整条不画，不拿别的数去补坐标。
+    const reach = Math.abs(L) * scale;
+    if (!(reach > 1e-6)) return null;
     for (let i = 0; i < count; i++) {
-      const y = rdAt(bytes, nbits, 210 + i * 128), x = rdAt(bytes, nbits, 274 + i * 128);
-      if (!okPt(x, y)) return null;
-      pts.push([x, y]);
+      const ay = rdAt(bytes, nbits, 210 + i * 128), ax = rdAt(bytes, nbits, 274 + i * 128);
+      if (!okPt(ax, ay) || Math.hypot(ax - x, ay - y) > reach * 8) return null;
+      pts.push([ax, ay]);
     }
     return { kind, scale, rot, L, x, y, pts, geometryOnly: true };
   }
@@ -828,6 +831,17 @@ export function tchBuild(f, dec) {
 
 // 从 LibreDWG（wasm）里取出天正对象。结构体偏移是针对随软件附带的 libredwg-web.wasm 的，读到的
 // 数据不符合预期时直接放弃，不会影响图纸其余部分。
+// 解不开或字段对不上的天正对象记成「未支持」。同一类里已经画出一部分时，失败的那些仍然要提示，不能悄悄丢掉。
+export function tchUnsupported(tch) {
+  const out = {};
+  if (!tch) return out;
+  const drawn = new Set((tch.items || []).map(it => it.cls).filter(Boolean));
+  for (const [k, v] of Object.entries(tch.counts || {})) {
+    if (/^TCH_/.test(k) && !drawn.has(k) && (!tch.decoded || !TCH_CLASSES.has(k))) out[k] = v;
+  }
+  if (tch.decoded) for (const [k, v] of Object.entries(tch.failed || {})) if (v > 0) out[k + '未支持'] = v;
+  return out;
+}
 // 返回 { items: [{ f, layer, color, style, mode, owner }], counts: { 类名: 个数 }, failed: { 类名: 个数 } }
 const STREAM_CLASSES = new Set(['TCH_TEXT', 'TCH_MTEXT', 'TCH_MULTILEADER', 'TCH_ARROW', 'TCH_COMPOSING', 'TCH_SYMB_SECTION', 'TCH_DRAWINGNAME']);
 export function extractTch(m, dwg, hex, mode = true) {
