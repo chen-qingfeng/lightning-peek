@@ -1,8 +1,8 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch, textAnchor, tchDrawnHeight } from '../app/renderer/core/tarch.js';
-import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch, textAnchor } from '../app/renderer/core/tarch.js';
+import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene, makeRec } from '../app/renderer/core/engine.js';
 
 class W {
   constructor() { this.bits = []; }
@@ -132,7 +132,7 @@ test('2007 Tianzheng text is read from the string stream, not the 2000 field ord
     return String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26));
   };
   // 写进去的十进制会在第 0、2 位各垫一个字符，读的时候去掉
-  assert.equal(tgNumber(pair('X') + pair('5') + pair('Y') + pair('.') + pair('2')), 5.2);
+  assert.equal(tgNumber(pair('2') + pair('.') + pair('Y') + pair('5') + pair('X')), 5.2);
   assert.equal(tgNumber('线下文字页宽'), NaN);
 
   const w = new W();
@@ -296,23 +296,102 @@ test('text anchor is the first 3-digit code after the words, not a later one', (
   assert.equal(textAnchor(['注', encDigits('102')]), 0);
 });
 
-test('2007 leader text uses the 3 mm and 3.5 mm paper heights instead of the nominal 5', () => {
-  const enc = s => {
-    const raw = 'A' + s[0] + 'B' + s.slice(1);
-    let out = '';
-    for (const ch of raw) {
-      const v = ch.charCodeAt(0) ^ 4;
-      out += String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26));
-    }
-    return out;
-  };
-  const small = tchDrawnHeight(['平直段', enc('0.131')]);
-  const big = tchDrawnHeight(['拆除', enc('5.439')]);
-  assert.ok(Math.abs(small - 3 * 68 / 141) < 1e-12, small);
-  assert.ok(Math.abs(big - 3.5 * 68 / 141) < 1e-12, big);
-  assert.ok(Math.abs(small - 1.446808510638298) < 1e-12);
-  assert.ok(Math.abs(big - 1.6879432624113475) < 1e-9);
-  assert.equal(tchDrawnHeight(['注', enc('2')]), 0);
+test('2007 numeric strings reverse before removing salt (including negatives)', () => {
+  assert.equal(tgNumber(encDigits('0000000000000005.401')), 0.5);
+  assert.equal(tgNumber(encDigits('0000000000000005.037')), 3.5);
+  assert.equal(tgNumber(encDigits('3215296414122908.046')), 4.8092214146925123);
+  assert.equal(tgNumber(encDigits('0000000000000000.00013-8')), -1000);
+});
+
+// Synthetic string-stream records follow the field order checked against a T3 export.
+const encodeNumber = v => {
+  const s = String(v);
+  return encDigits([...'6' + s[0] + '4' + s.slice(1)].reverse().join(''));
+};
+function streamRecord(kind, scale, angle, anchor = 1, baseAngle = 0) {
+  const w = new W();
+  if (kind === 'TCH_ARROW') {
+    w.put(0, 86);
+    for (const [x, y] of [[100, 100], [120, 100], [130, 80]]) { w.RD(x); w.RD(y); w.put(0, 2); }
+  } else { w.put(0, 96); w.RD(100); w.put(0, 4); w.RD(120); }
+  const start = w.bits.length;
+  const strs = kind === 'TCH_ARROW'
+    ? ['', '', encodeNumber(scale), encodeNumber(angle), '', 'TDBXDATAMAP_BLOCK_BEGIN_', 'T20d22', 'TDBXDATAMAP_BLOCK_END_', '', '', encodeNumber(3.5), encodeNumber(0), encDigits('172'), encDigits('528'), '上行', encodeNumber(3), '', '', '', '下行']
+    : ['', '', encodeNumber(scale), encodeNumber(baseAngle), '', '标注', encodeNumber(3.5), encodeNumber(angle), encDigits('1' + anchor + '2')];
+  for (const s of strs) { w.BS(s.length); for (const ch of s) w.RS(ch.charCodeAt(0)); }
+  const length = w.bits.length - start;
+  w.RS(length); w.put(1, 1);
+  return decodeTchStream(kind, w.bytes(), w.bits.length, w.bits.length);
+}
+test('2007 text uses stored height, scale, rotation and top attachment without a partner', () => {
+  for (const scale of [0.5, 2]) for (const angle of [0, 4.8092214146925123]) {
+    const f = streamRecord('TCH_TEXT', scale, angle);
+    placeSharedText([f]);
+    orientTch({header: {$UCSXDIR: [[10, '0'], [20, '1']]}, blocks: new Map(), entities: []}, {items: [{cls: 'TCH_TEXT', mode: 2, f}]});
+    const g = Object.fromEntries(tchBuild(f, () => '')[0].pairs);
+    assert.equal(g[10], 120); assert.equal(g[20], 100);
+    assert.equal(f.h, 3.5); // 存储字高不变，显示降一档。
+    assert.equal(g[40], 3 * scale); assert.equal(g[73], 3);
+    assert.ok(Math.abs(g[50] - angle * 180 / Math.PI) < 1e-10);
+  }
+});
+test('2007 text combines its object axis and local text angle', () => {
+  const f = streamRecord('TCH_TEXT', 0.5, 0.301877823441449, 8, 4.812566142627035);
+  assert.ok(Math.abs(f.rot * 180 / Math.PI - 293.0360538118741) < 1e-10);
+});
+test('2007 green arrow notes straddle the landing, away from the arrow tip', () => {
+  const f = streamRecord('TCH_ARROW', 0.5, 0);
+  const texts = tchBuild(f, () => '').filter(r => r.type === 'TEXT').map(r => Object.fromEntries(r.pairs));
+  assert.equal(texts.length, 2);
+  assert.deepEqual(texts.map(g => g[40]), [1.5, 1.5]);
+  assert.deepEqual(texts.map(g => g[10]), [110, 110]);
+  assert.deepEqual(texts.map(g => g[20]), [100.5, 99.5]);
+  assert.deepEqual(texts.map(g => g[73]), [0, 3]);
+});
+
+function leaderStream(count, length = -20) {
+  const w = new W(); w.put(0, 82); w.RD(100); w.RD(100);
+  for (let i = 0; i < count; i++) { w.RD(90); w.RD(110 + i * 10); }
+  w.put(0, 396);
+  const start = w.bits.length, strs = Array(25).fill('');
+  strs[2] = encodeNumber(0.5); strs[3] = encodeNumber(Math.PI / 2);
+  strs[15] = encodeNumber(length); strs[19] = encDigits('1' + count + '2');
+  for (const s of strs) { w.BS(s.length); for (const ch of s) w.RS(ch.charCodeAt(0)); }
+  w.RS(w.bits.length - start); w.put(1, 1);
+  return decodeTchStream('TCH_MULTILEADER', w.bytes(), w.bits.length, w.bits.length);
+}
+test('2007 multileaders without embedded text restore baseline, branches and arrowheads', () => {
+  for (const count of [1, 2]) {
+    const f = leaderStream(count);
+    assert.ok(f);
+    const built = tchBuild(f, () => { throw new Error('leader has no text'); });
+    const lines = built.filter(r => r.type === 'LINE').map(r => Object.fromEntries(r.pairs));
+    assert.equal(lines.length, count + 1);
+    assert.equal(built.filter(r => r.type === 'LWPOLYLINE').length, count);
+    assert.equal(built.filter(r => /TEXT/.test(r.type)).length, 0);
+    assert.equal(lines[0][10], 100); assert.equal(lines[0][20], 100);
+    assert.ok(Math.abs(lines[0][11] - 100) < 1e-10); assert.equal(lines[0][21], 90);
+    assert.deepEqual(lines.slice(1).map(g => [g[10], g[20], g[11], g[21]]),
+      Array.from({length: count}, (_, i) => [110 + i * 10, 90, 100, 100]));
+  }
+});
+test('2007 multileaders reject missing endpoints and invalid lengths', () => {
+  assert.equal(leaderStream(0), null);
+  assert.equal(leaderStream(1, Infinity), null);
+});
+
+test('bundled font replacement preserves the drawing anchor and text geometry', () => {
+  const doc = parseDxf('0\nSECTION\n2\nENTITIES\n0\nENDSEC\n0\nEOF\n');
+  const pairs = [[10, 100], [20, 200], [11, 100], [21, 200], [40, 1.5], [50, 30], [72, 2], [73, 3], [7, 'CUSTOM'], [1, '引注123']];
+  doc.styles.set('CUSTOM', {font:'custom.shx',big:'custombig.shx',wf:0.8,h:0});
+  doc.entities.push(makeRec('TEXT',pairs),makeRec('TEXT',pairs,{_tchBundled:true}));
+  const texts=buildScene(doc).spaces.flatMap(s=>s.texts);
+  const [original, replacement]=texts;
+  assert.equal(texts.length,2);
+  for (const key of ['x','y','ux','uy','vx','vy','h','wf','ha','va']) assert.equal(replacement[key],original[key],key);
+  assert.equal(original.sf,'custom.shx');
+  assert.equal(replacement.sf,''); assert.equal(replacement.bf,''); assert.equal(replacement.ff,'');
+  assert.equal(replacement.f,0);
 });
 
 test('old-format text with rot 0 is not turned by a rotated viewport', () => {
