@@ -164,3 +164,15 @@ test('dash patterns keep gaps where the line type puts them', () => {
   // 只有画的段是实线
   assert.deepEqual(canvasDash([4, 4]), { dash: [], offset: 0 });
 });
+
+import { errText, dwgMagic } from '../app/renderer/core/dwgconv.js';
+test('DWG 错误位按 LibreDWG 定义解释，2048 不再一律说版本过新', () => {
+  assert.match(errText(2048, 'AC1032'), /无法识别|损坏/);
+  assert.doesNotMatch(errText(2048, 'AC1032'), /过新/);
+  assert.match(errText(2048, 'AC1040'), /过新/);
+  assert.match(errText(2048, 'AC1009'), /太旧/);
+  assert.match(errText(2048, ''), /不是可识别的 DWG/);
+  assert.match(errText(8192 | 2048, 'AC1027'), /内存不够/);
+  assert.match(errText(4096, 'AC1027'), /读取图纸文件出错/);
+  assert.equal(dwgMagic(new TextEncoder().encode('AC1032xx')), 'AC1032');
+});

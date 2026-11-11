@@ -2,6 +2,13 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.21] – Preview – 2026-11-12
+
+### Fixed
+- Opening a third or fourth DWG no longer hangs on "Converting DWG" or fails. Each DWG is now converted in its own short-lived reader thread that is closed as soon as the file is read, so its memory (at least 1 GB per file) is returned at once. Before, old readers piled up until there was no memory left.
+- A conversion that runs longer than five minutes stops with a message instead of blocking every drawing opened after it. A reader that crashes is retried once in a fresh thread.
+- Error messages follow the real LibreDWG error. Before, any file the reader could not make sense of, for example a valid drawing read after memory ran out, could be reported as "drawing version too new". Now the message names the file's version and says whether the file looks damaged, is not a DWG, or memory ran out.
+
 ## [0.2.20] – Preview – 2026-11-11
 
 ### Fixed

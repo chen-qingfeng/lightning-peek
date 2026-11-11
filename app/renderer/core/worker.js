@@ -1,89 +1,67 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
-import { extractTch, tchBuild, tchMarkup, orientTch, tchUnsupported } from './tarch.js';
+import { tchBuild, tchMarkup, orientTch, tchUnsupported } from './tarch.js';
 import { serial } from './serial.js';
 import { injectedPoints, lostCount } from './lost.js';
+import { convertDwg } from './dwgconv.js';
 
-let wasm = null;
-let booting = null;
-// 读图模块单独准备。编译放在打开之前，不改后面的解析和画图。
-function bootWasm() {
-  if (wasm) return Promise.resolve(wasm);
-  if (!booting) {
-    booting = (async () => {
-      const mod = (await import('../lib/libredwg-web.js')).default;
-      const m = await mod({ locateFile: (f) => new URL('../lib/' + f, import.meta.url).href });
-      wasm = m;
-      booting = null;
-      return m;
-    })().catch((e) => { booting = null; throw e; });
+// 每张 DWG 在一个新的读图线程里转换，读完就关掉线程。
+// 以前在同一个线程里每张图换一个新的读图模块：旧模块每个至少占 1GB，回收不及时，
+// 连开三四张大图后内存不够，后面的图卡在「正在转换」或报出误导的错误。
+const LIB = new URL('../lib/libredwg-web.wasm', import.meta.url).href;
+const JOB_MS = 5 * 60 * 1000;
+let compiled = null;
+function wasmModule() {
+  if (!compiled) compiled = (async () => {
+    const res = await fetch(LIB);
+    return WebAssembly.compileStreaming ? WebAssembly.compileStreaming(res) : WebAssembly.compile(await res.arrayBuffer());
+  })().catch(() => (compiled = null));
+  return compiled;
+}
+function runJob(bytes, module) {
+  return new Promise((resolve, reject) => {
+    let w;
+    try { w = new Worker(new URL('./dwgjob.js', import.meta.url), { type: 'module' }); } catch (e) { reject(Object.assign(e, { noWorker: true })); return; }
+    const done = (fn, v) => { clearTimeout(timer); w.terminate(); fn(v); };
+    const timer = setTimeout(() => done(reject, new Error('转换超时，这张图纸可能太大或已损坏。可以在 CAD 软件里另存为 DXF 后再试')), JOB_MS);
+    w.onmessage = (e) => {
+      const m = e.data;
+      if (m.ok) done(resolve, m.r);
+      else done(reject, Object.assign(new Error(m.error), { code: m.code, trap: m.trap }));
+    };
+    w.onerror = (e) => { e.preventDefault && e.preventDefault(); done(reject, Object.assign(new Error('读图线程出错：' + (e.message || '')), { trap: true })); };
+    w.onmessageerror = () => done(reject, Object.assign(new Error('读图线程出错'), { trap: true }));
+    const copy = bytes.slice();
+    w.postMessage({ bytes: copy.buffer, module }, [copy.buffer]);
+  });
+}
+// 没有子线程可用（个别浏览器）时，退回在本线程里读：每张图都换一个新模块
+let factory = null;
+async function runHere(bytes) {
+  if (!factory) factory = (await import('../lib/libredwg-web.js')).default;
+  const m = await factory({ locateFile: (f) => new URL('../lib/' + f, import.meta.url).href });
+  return convertDwg(m, bytes);
+}
+const canNest = typeof Worker !== 'undefined';
+async function dwgToDxf(bytes) {
+  if (!canNest) return runHere(bytes);
+  const module = await wasmModule();
+  try { return await runJob(bytes, module || null); }
+  catch (e) {
+    if (e.noWorker) return runHere(bytes);
+    // 线程崩溃、wasm 越界或内存不够：换一个干净的线程再读一次
+    if (!(e.trap || (e.code & 8192))) throw e;
+    try { return await runJob(bytes, module || null); }
+    catch (e2) {
+      if (e2.trap) throw new Error('读图模块读这张图时出错（' + e2.message + '），可能含有暂不支持的对象。可以在 CAD 软件里另存为 DXF 后再试');
+      throw e2;
+    }
   }
-  return booting;
 }
-function lib() { return bootWasm(); }
-function retireWasm() {
-  wasm = null;
-  bootWasm().catch(() => {});
-}
+
 const docs = new Map();
 const dwgQueue = serial();
 
-const wasmTrap = e => /memory access out of bounds|^Aborted\(/.test(String(e && e.message || e));
-function dwgToDxf(m, bytes) {
-  const inF = '/in_' + Date.now() + '.dwg', outF = inF.replace('.dwg', '.dxf');
-  m.FS.writeFile(inF, bytes);
-  let dwg = 0;
-  try {
-    const r = m.dwg_read_file(inF);
-    const err = r && typeof r.error === 'number' ? r.error : 0;
-    dwg = r && r.data || 0;
-    if (err >= 128) throw new Error(errText(err));
-    // 先把 DXF 复制出来。后面读天正、OLE 时若 wasm 越界，普通图元仍然能打开。
-    const rc = m.dwg_write_dxf(inF, outF);
-    if (rc >= 128 || !m.FS.analyzePath(outF).exists) throw new Error(errText(rc || err));
-    const out = new Uint8Array(m.FS.readFile(outF));
-    let oles = [], tch = null;
-    if (dwg && err < 128) {
-      try { oles = extractOles(m, dwg); } catch (e) { console.warn('OLE', e); if (wasmTrap(e)) wasm = null; }
-      // 2000/2004 按字段顺序读。2007 的文字在字符串流里，不能沿用旧顺序。
-      const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
-      const mode = ver === 'AC1015' || ver === 'AC1018' ? 1 : ver === 'AC1021' ? 2 : 0;
-      if (wasm) { try { tch = extractTch(m, dwg, hex, mode); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
-    }
-    return { bytes: out, warn: err, oles, tch };
-  } finally {
-    // 写某些图（例如这张 AC1015 天正图）的 DXF 时，LibreDWG 会把 wasm 堆写坏，
-    // 下一张图再读就变成 memory access out of bounds。DXF 已经复制出来，丢掉整个模块。
-    try { if (dwg && m.dwg_free) m.dwg_free(dwg); } catch (e) { /* 模块即将丢弃 */ }
-    retireWasm();
-    try { m.FS.unlink(inF); } catch (e) { /* ignore */ }
-    try { m.FS.unlink(outF); } catch (e) { /* ignore */ }
-  }
-}
-// LibreDWG 写 DXF 时会丢掉 OLE2FRAME，这里直接从 DWG 对象里取出数据和位置
-const hex = v => (typeof v === 'bigint' ? v : BigInt(Math.round(Number(v) || 0))).toString(16).toUpperCase();
-function extractOles(m, dwg) {
-  const out = [];
-  const n = m.dwg_get_num_objects(dwg);
-  for (let i = 0; i < n; i++) {
-    try {
-      const obj = m.dwg_get_object(dwg, i);
-      if (!obj || m.dwg_object_get_fixedtype(obj) !== 74) continue; // 74 = OLE2FRAME
-      const et = m.dwg_object_to_entity_tio(obj);
-      const ent = m.dwg_object_to_entity(obj);
-      const d = m.dwg_entity_ole2frame_get_data(et);
-      const data = d && d.data; if (!data || !data.length) continue;
-      const p1 = m.dwg_dynapi_entity_value(et, 'pt1')?.data, p2 = m.dwg_dynapi_entity_value(et, 'pt2')?.data;
-      if (!p1 || !p2) continue;
-      let mode = 2, owner = '', layer = '';
-      try { mode = m.dwg_object_entity_get_entmode(ent); } catch (e) { /* ignore */ }
-      try { const o = m.dwg_object_entity_get_ownerhandle_object(ent); if (o && o.absolute_ref) owner = hex(o.absolute_ref); } catch (e) { /* ignore */ }
-      try { const l = m.dwg_object_entity_get_layer_object_ref(ent); if (l && l.absolute_ref) layer = hex(l.absolute_ref); } catch (e) { /* ignore */ }
-      out.push({ data: new Uint8Array(data), p1: [p1.x, p1.y], p2: [p2.x, p2.y], mode, owner, layer });
-    } catch (e) { if (wasmTrap(e)) throw e; }
-  }
-  return out;
-}
 // 把 DXF 输出里丢失的对象作为记录放回解析后的图纸：模型空间 / 图纸空间 / 所在的块
 function placer(doc) {
   const byHandle = new Map(); for (const [h, nm] of doc.blockRecords) byHandle.set(h, nm);
@@ -140,14 +118,6 @@ function injectTch(doc, tch) {
   return n;
 }
 function tchSkipped(tch) { return tchUnsupported(tch); }
-function errText(code) {
-  if (code & 2048) return '图纸版本过新或不受支持。可以在 CAD 软件里另存为 2007 或更早版本后再打开';
-  if (code & 1024) return '图纸文件损坏或不完整。可以用 CAD 软件的「修复」功能处理后再打开';
-  if (code & 512) return '图纸被加密或格式无法识别。请确认文件是 DWG 格式，加密图纸需先在原软件中解密';
-  if (code & 256) return '无法读取这张图纸，文件可能已损坏。可以用 CAD 软件的「修复」功能处理，或另存为 DXF 后再试';
-  if (code & 128) return '图纸缺少必要数据，无法打开。可以在 CAD 软件里另存一份后再试';
-  console.warn('LibreDWG error code', code); return '图纸无法解析。可以在 CAD 软件里另存为 DXF 后再试，并欢迎反馈这张图纸的情况';
-}
 
 function collect(scene, list = []) {
   for (const s of scene.spaces) {
@@ -167,8 +137,8 @@ async function open(id, name, bytes) {
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
-    // 一张一张读。每张读完都会丢掉读图模块，排在后面的图要等新的模块，不能用前一张用过的。
-    const r = await dwgQueue(async () => dwgToDxf(await lib(), bytes));
+    // 一张一张读，同一时间只有一个读图线程占内存
+    const r = await dwgQueue(() => dwgToDxf(bytes));
     dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
@@ -359,7 +329,7 @@ function filterRegion(text, bb) {
   return out.join('\r\n');
 }
 function post(m, t) { self.postMessage(m, t || []); }
-bootWasm().catch(() => {});
+wasmModule();
 self.onmessage = async (e) => {
   const { id, cmd } = e.data;
   try {
