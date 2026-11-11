@@ -234,35 +234,154 @@ function composingFields(strs) {
   const side = [...ints].reverse().find(d => ti < 0 || d.i < ti)?.v;
   return { height, ratio, base, side: side == null ? 1 : side };
 }
-// 文字后面的三位数字，中间一位是附着点。1、2、3 表示插入点在字形上沿，7、8、9 表示插入点在基线。
-// 前后两位随对象变化，不能当成坐标。
-function textAnchor(strs) {
+// 文字后面的三位数字，中间一位是附着点，和多行文字一样：
+// 1 2 3 上沿的左/中/右，4 5 6 正中的左/中/右，7 8 9 基线的左/中/右。
+// 左右那一位决定文字从插入点向哪一侧排开。前后两位随对象变化，不能当成坐标。
+// 只认文字后面第一组三位数字。再往后的数字可能是别的标志，不能覆盖附着点。
+export function textAnchor(strs) {
   const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
-  let top = false, bot = false;
-  strs.forEach((s, i) => {
-    if (ti >= 0 && i <= ti) return;
-    const d = saltedDigit(tgAscii(s));
-    if (d >= 1 && d <= 3) top = true;
-    else if (d >= 7 && d <= 9) bot = true;
-  });
-  if (top === bot) return 0;
-  return top ? 1 : 7;
+  for (let i = (ti < 0 ? 0 : ti + 1); i < strs.length; i++) {
+    const d = saltedDigit(tgAscii(strs[i]));
+    if (d >= 1 && d <= 9) return d;
+  }
+  return 0;
 }
-// 两条文字的插入点几乎重合时，按各自的附着点分别画在这个点的上方和下方。
-// 插入点本身不挪，字高不放大。已经分开的文字保持基线落在自己的点上。
+// 7/8/9 用 10/11/12：那三个值在单行文字里是基线的左/中/右，不是正中。
+export function tchAlign(anchor) {
+  if (anchor >= 1 && anchor <= 6) return anchor;
+  if (anchor === 7) return 10;
+  if (anchor === 8) return 11;
+  if (anchor === 9) return 12;
+  return 10;
+}
+// 上下两条引出文字的插入点相差不到 2 个图形单位时，连线垂直于文字方向。
+// 插入点不挪。没配对、锚点又是 1–3 的单行文字保持原来的对齐，不改成上沿。
+// 有多个候选时用最近的一条，避免把旁边另一组引出文字配进来。
 export function placeSharedText(items) {
   const texts = [];
   for (const f of items) {
-    if (!f || (f.kind !== 'TCH_TEXT' && f.kind !== 'TCH_MTEXT')) continue;
-    if (f.anchor !== 1 && f.anchor !== 7) continue;
+    if (!f || f.kind !== 'TCH_TEXT') continue;
+    if (!(f.anchor >= 1 && f.anchor <= 9)) continue;
     if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) continue;
     texts.push(f);
   }
   for (const f of texts) {
-    // 叠在一起的两条，插入点只差大约 1 个图形单位。真正换行的两条至少隔着一个字高。
-    const share = texts.some(g => g !== f && (f.anchor === 1) !== (g.anchor === 1) && Math.hypot(f.x - g.x, f.y - g.y) < 2);
-    if (!share) continue;
-    f.align = f.anchor === 1 ? 1 : 10;
+    const top = f.anchor <= 3;
+    let partner = null, best = 2;
+    for (const g of texts) {
+      if (g === f || (g.anchor <= 3) === top) continue;
+      if ((g.anchor - 1) % 3 !== (f.anchor - 1) % 3) continue;
+      const d = Math.hypot(f.x - g.x, f.y - g.y);
+      if (d < best) { best = d; partner = g; }
+    }
+    if (partner) {
+      f.align = tchAlign(f.anchor);
+      if (!f.rot) {
+        const base = top ? partner : f;
+        const other = top ? f : partner;
+        const vx = other.x - base.x, vy = other.y - base.y;
+        if (Math.hypot(vx, vy) > 1e-6) {
+          const upx = -vx, upy = -vy;
+          f.pairRot = Math.atan2(-upx, upy);
+          // 先记下配对方向。orientTch 还会拿它和坐标系比，差得太多就不用。
+          f.rot = f.pairRot;
+          f.rotFrom = 'pair';
+        }
+      }
+    } else if (f.anchor >= 4) f.align = tchAlign(f.anchor);
+  }
+}
+function hdrNum(doc, key, code, d) {
+  const h = doc && doc.header && doc.header[key];
+  if (!h) return d;
+  const it = h.find(x => x[0] === code);
+  const v = it ? parseFloat(it[1]) : NaN;
+  return Number.isFinite(v) ? v : d;
+}
+function readViewports(doc) {
+  const out = [];
+  const scan = ents => {
+    if (!ents) return;
+    for (const r of ents) {
+      if (!r || r.type !== 'VIEWPORT' || typeof r.f !== 'function') continue;
+      if (typeof r.i === 'function' && (r.i(90) & 131072)) continue;
+      if (typeof r.i === 'function' && r.i(69, 2) === 1) continue;
+      const h = r.f(41), vh = r.f(45), w = r.f(40);
+      if (!(h > 0) || !(vh > 0) || !(w > 0)) continue;
+      out.push({
+        h, vh, w, tx: r.f(17), ty: r.f(27), vcx: r.f(12), vcy: r.f(22),
+        twist: r.f(51) * Math.PI / 180,
+        ucs: Math.atan2(r.f(121, 0), r.f(111, 1)),
+      });
+    }
+  };
+  scan(doc && doc.entities);
+  if (doc && doc.blocks) for (const b of doc.blocks.values()) scan(b.ents);
+  return out;
+}
+// 模型点是否落在这个视口里。边缘留一成，避免刚好压在视口线上的引出文字被漏掉。
+export function viewportContains(vp, x, y) {
+  const qx = x - (vp.tx || 0), qy = y - (vp.ty || 0);
+  const c = Math.cos(vp.twist || 0), s = Math.sin(vp.twist || 0);
+  const dx = c * qx - s * qy - vp.vcx, dy = s * qx + c * qy - vp.vcy;
+  const hw = vp.vh * (vp.w / vp.h) / 2, hh = vp.vh / 2;
+  return Math.abs(dx) <= hw * 1.1 && Math.abs(dy) <= hh * 1.1;
+}
+function viewportFor(vps, x, y) {
+  const hits = vps.filter(vp => viewportContains(vp, x, y));
+  if (!hits.length) return null;
+  // 同一个模型范围可能同时落在两个布局里。有用户坐标的那个才是改过坐标系的视口。
+  const turned = hits.filter(vp => Math.abs(vp.ucs) > 1e-4);
+  const pool = turned.length ? turned : hits;
+  pool.sort((a, b) => a.vh * a.vh * (a.w / a.h) - b.vh * b.vh * (b.w / b.h));
+  return pool[0];
+}
+function headerUcsAngle(doc) {
+  const x = hdrNum(doc, '$UCSXDIR', 10, 1), y = hdrNum(doc, '$UCSXDIR', 20, 0);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || Math.hypot(x, y) < 1e-9) return 0;
+  const ang = Math.atan2(y, x);
+  return Math.abs(ang) < 1e-4 ? 0 : ang;
+}
+function angDiff(a, b) {
+  let d = (a - b) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return Math.abs(d);
+}
+// 只处理模型空间里、从字符串流解出来的单行天正文字。图纸空间不动。
+// 2000/2004 的文字没有 anchor，方向和对齐已经在对象里，这里不动。
+// TCH_MTEXT 保持名义字高和左上对齐，不在这里改方向。
+// decodeTchStream 给单行文字的结果里没有 pts，所以不读引线点链。
+// 配对方向先记在 pairRot。这里再和坐标系比：差过约 5° 就丢掉配对，改用坐标系。
+// 这样配对不会挡住后面的来源。文件头 $UCSXDIR 非零时，也不把没配对的横排文字一起转过去。
+const PAIR_UCS_LIMIT = 5 * Math.PI / 180;
+export function orientTch(doc, tch) {
+  if (!doc || !tch || !tch.items) return;
+  const header = headerUcsAngle(doc);
+  const vps = readViewports(doc);
+  for (const it of tch.items) {
+    const f = it.f;
+    if (!f || it.mode === 1) continue;
+    if (it.cls !== 'TCH_TEXT' || f.kind !== 'TCH_TEXT') continue;
+    // 2000/2004 走 decodeTch，自带 rot 和 align，没有 anchor。
+    // rot 为 0 时挡不住，会被所在视口的用户坐标转掉。只处理字符串流解出来的文字。
+    if (f.anchor === undefined) continue;
+    if (f.rot && f.rotFrom !== 'pair') continue;
+    const vp = viewportFor(vps, f.x, f.y);
+    const viewUcs = vp && Math.abs(vp.ucs) > 1e-4 ? vp.ucs : 0;
+    const ref = header || viewUcs;
+    if (f.pairRot != null && !(ref && angDiff(f.pairRot, ref) > PAIR_UCS_LIMIT)) {
+      f.rot = f.pairRot;
+      f.rotFrom = 'pair';
+      continue;
+    }
+    if (f.pairRot != null && ref) {
+      f.rot = ref;
+      f.rotFrom = 'ucs';
+      continue;
+    }
+    if (header) continue;
+    if (viewUcs) { f.rot = viewUcs; f.rotFrom = 'viewport'; }
   }
 }
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
@@ -307,7 +426,9 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     const tall = strs.map(tgNumber).filter(v => v >= 4 && v <= 15);
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : 10, anchor: textAnchor(strs), width: 0, text: body };
+  const anchor = textAnchor(strs);
+  // 字高保持字符串流里的名义值，不在这里换算。多行仍是左上对齐。
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------
