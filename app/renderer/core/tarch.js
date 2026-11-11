@@ -270,6 +270,7 @@ export function placeSharedText(items) {
     let partner = null, best = 2;
     for (const g of texts) {
       if (g === f || (g.anchor <= 3) === top) continue;
+      if ((g.anchor - 1) % 3 !== (f.anchor - 1) % 3) continue;
       const d = Math.hypot(f.x - g.x, f.y - g.y);
       if (d < best) { best = d; partner = g; }
     }
@@ -281,7 +282,9 @@ export function placeSharedText(items) {
         const vx = other.x - base.x, vy = other.y - base.y;
         if (Math.hypot(vx, vy) > 1e-6) {
           const upx = -vx, upy = -vy;
-          f.rot = Math.atan2(-upx, upy);
+          f.pairRot = Math.atan2(-upx, upy);
+          // 先记下配对方向。orientTch 还会拿它和坐标系比，差得太多就不用。
+          f.rot = f.pairRot;
           f.rotFrom = 'pair';
         }
       }
@@ -294,15 +297,6 @@ function hdrNum(doc, key, code, d) {
   const it = h.find(x => x[0] === code);
   const v = it ? parseFloat(it[1]) : NaN;
   return Number.isFinite(v) ? v : d;
-}
-// 一个图形单位里有多少毫米。0 表示文件没写单位，不能拿来换算。
-const MM_PER_UNIT = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 7: 1e6, 10: 914.4 };
-// 视口：模型高 f(45) ÷ 图纸高 f(41)，再除以每图形单位的毫米数，得到「每个纸面毫米对应多少图形单位」。
-export function modelPerPaperMm(vp, insunits) {
-  if (!vp || !(vp.h > 0) || !(vp.vh > 0)) return 0;
-  const mm = MM_PER_UNIT[insunits];
-  if (!(mm > 0)) return 0;
-  return (vp.vh / vp.h) / mm;
 }
 function readViewports(doc) {
   const out = [];
@@ -348,49 +342,43 @@ function headerUcsAngle(doc) {
   const ang = Math.atan2(y, x);
   return Math.abs(ang) < 1e-4 ? 0 : ang;
 }
-// 只处理模型空间里的单行天正文字。图纸空间不动。多行天正文字（TCH_MTEXT）保持名义字高和左上对齐，不跟视口转。
-// 方向优先用配对点，其次文件头 $UCSXDIR，再次对象上的引线点链，最后才用文字所在视口的用户坐标横轴。
+function angDiff(a, b) {
+  let d = (a - b) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return Math.abs(d);
+}
+// 只处理模型空间里的单行天正文字。图纸空间不动。
+// TCH_MTEXT 保持名义字高和左上对齐，不在这里改方向。
+// decodeTchStream 给单行文字的结果里没有 pts，所以不读引线点链。
+// 配对方向先记在 pairRot。这里再和坐标系比：差过约 5° 就丢掉配对，改用坐标系。
+// 这样配对不会挡住后面的来源。文件头 $UCSXDIR 非零时，也不把没配对的横排文字一起转过去。
+const PAIR_UCS_LIMIT = 5 * Math.PI / 180;
 export function orientTch(doc, tch) {
   if (!doc || !tch || !tch.items) return;
   const header = headerUcsAngle(doc);
   const vps = readViewports(doc);
-  const ins = hdrNum(doc, '$INSUNITS', 70, 0);
-  const dim = hdrNum(doc, '$DIMSCALE', 40, 0);
   for (const it of tch.items) {
     const f = it.f;
     if (!f || it.mode === 1) continue;
     if (it.cls !== 'TCH_TEXT' || f.kind !== 'TCH_TEXT') continue;
-    if (f.paperMm > 0) {
-      const vp = viewportFor(vps, f.x, f.y);
-      const fromVp = vp ? modelPerPaperMm(vp, ins) : 0;
-      const scale = fromVp > 0 ? fromVp : (dim > 1 ? dim : 0);
-      if (scale > 0) f.h = f.paperMm * scale;
-    }
-    if (f.rot) continue;
-    if (header) { f.rot = header; f.rotFrom = 'header'; continue; }
-    if (f.pts && f.pts.length >= 2) {
-      const a = f.pts[f.pts.length - 2], b = f.pts[f.pts.length - 1];
-      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-      if (len > 1e-6) { f.rot = Math.atan2(b[1] - a[1], b[0] - a[0]); f.rotFrom = 'chain'; continue; }
-    }
+    if (f.rot && f.rotFrom !== 'pair') continue;
     const vp = viewportFor(vps, f.x, f.y);
-    if (vp && Math.abs(vp.ucs) > 1e-4) { f.rot = vp.ucs; f.rotFrom = 'viewport'; }
+    const viewUcs = vp && Math.abs(vp.ucs) > 1e-4 ? vp.ucs : 0;
+    const ref = header || viewUcs;
+    if (f.pairRot != null && !(ref && angDiff(f.pairRot, ref) > PAIR_UCS_LIMIT)) {
+      f.rot = f.pairRot;
+      f.rotFrom = 'pair';
+      continue;
+    }
+    if (f.pairRot != null && ref) {
+      f.rot = ref;
+      f.rotFrom = 'ucs';
+      continue;
+    }
+    if (header) continue;
+    if (viewUcs) { f.rot = viewUcs; f.rotFrom = 'viewport'; }
   }
-}
-// 文字后面第一个数如果是整数，或落在 1–4，就停。那不是纸面字高，也不能跳过它去抓后面的小数。
-// 只有正好是 2.5、3、3.5、5、7、10 毫米，或 250–1000 的整百毫米，才当作纸面字高。
-// 分不到时返回 0。调用方不要把它换成字符串流里那个约 5 的名义数再拿去当图形字高。
-export function tchPaperMm(strs) {
-  const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
-  for (let i = (ti < 0 ? 0 : ti + 1); i < strs.length; i++) {
-    const v = tgNumber(strs[i]);
-    if (!(v > 0)) continue;
-    if (v === 2.5 || v === 3 || v === 3.5 || v === 5 || v === 7 || v === 10) return v;
-    if (v === 250 || v === 300 || v === 350 || v === 500 || v === 700 || v === 1000) return v / 100;
-    // 整数或 1–4 之间的数不是纸面字高。停在这里，不要再去抓后面的小数。
-    return 0;
-  }
-  return 0;
 }
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
@@ -435,10 +423,8 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
   const anchor = textAnchor(strs);
-  // 多行仍用名义字高和左上对齐。单行只有读到纸面字高才记下，等 orientTch 按所在视口换算。
-  // 换算不成时保留名义高度，调用方不要再乘一个写死的系数。
-  const paperMm = !multi ? tchPaperMm(strs) : 0;
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, paperMm, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
+  // 字高保持字符串流里的名义值，不在这里换算。多行仍是左上对齐。
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------
