@@ -1,7 +1,7 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch, textAnchor } from '../app/renderer/core/tarch.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch, textAnchor, tchDrawnHeight } from '../app/renderer/core/tarch.js';
 import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
 
 class W {
@@ -294,6 +294,25 @@ test('anchors 4–6 set alignment, an unpaired 1–3 anchor does not, and the ne
 test('text anchor is the first 3-digit code after the words, not a later one', () => {
   assert.equal(textAnchor(['注', encDigits('076'), encDigits('395')]), 7);
   assert.equal(textAnchor(['注', encDigits('102')]), 0);
+});
+
+test('2007 leader text uses the 3 mm and 3.5 mm paper heights instead of the nominal 5', () => {
+  const enc = s => {
+    const raw = 'A' + s[0] + 'B' + s.slice(1);
+    let out = '';
+    for (const ch of raw) {
+      const v = ch.charCodeAt(0) ^ 4;
+      out += String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26));
+    }
+    return out;
+  };
+  const small = tchDrawnHeight(['平直段', enc('0.131')]);
+  const big = tchDrawnHeight(['拆除', enc('5.439')]);
+  assert.ok(Math.abs(small - 3 * 68 / 141) < 1e-12, small);
+  assert.ok(Math.abs(big - 3.5 * 68 / 141) < 1e-12, big);
+  assert.ok(Math.abs(small - 1.446808510638298) < 1e-12);
+  assert.ok(Math.abs(big - 1.6879432624113475) < 1e-9);
+  assert.equal(tchDrawnHeight(['注', enc('2')]), 0);
 });
 
 test('old-format text with rot 0 is not turned by a rotated viewport', () => {

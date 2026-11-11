@@ -384,6 +384,19 @@ export function orientTch(doc, tch) {
     if (viewUcs) { f.rot = viewUcs; f.rotFrom = 'viewport'; }
   }
 }
+// 2007 引出文字里那个约 5 的数不是画出来的字高。文字后面第一个小数用来分档。
+const TCH_DRAW_SCALE = 68 / 141;
+export function tchDrawnHeight(strs) {
+  const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
+  for (let i = Math.max(ti, 0) + 1; i < strs.length; i++) {
+    const v = tgNumber(strs[i]);
+    if (!(v > 0 && v < 20)) continue;
+    if (v < 1) return 3 * TCH_DRAW_SCALE;
+    if (v > 4 && Math.abs(v - Math.round(v)) > 1e-6) return 3.5 * TCH_DRAW_SCALE;
+    return 0;
+  }
+  return 0;
+}
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
   let span, strs;
@@ -427,8 +440,12 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
   const anchor = textAnchor(strs);
-  // 字高保持字符串流里的名义值，不在这里换算。多行仍是左上对齐。
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
+  // 单行引出文字不用字符串流里那个约 5 的名义值。那个数同一档里各不相同，炸开后的汉字字高却只有两档。
+  // 文字后面第一个 0–20 的数用来分档：小于 1 是 3 毫米，大于 4 的小数是 3.5 毫米。
+  // 再乘这张图炸开后核对出来的出图系数 68/141。3×68/141 = 1.446808510638298，3.5×68/141 = 1.687943262411348。
+  // 多行文字和分不到档的仍用名义值。旧格式文字不走这里。
+  const drawn = !multi ? tchDrawnHeight(strs) : 0;
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h: drawn > 0 ? drawn : h, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------
