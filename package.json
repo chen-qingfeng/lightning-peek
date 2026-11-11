@@ -11,7 +11,9 @@
     "pack:win": "bash build/pack-win.sh",
     "pack:setup": "bash build/pack-installer.sh",
     "pack:portable": "bash build/pack-portable.sh",
-    "phone": "node tools/serve-phone.mjs"
+    "phone": "node tools/serve-phone.mjs",
+    "android:www": "node tools/sync-android-www.mjs",
+    "android:www:small": "node tools/sync-android-www.mjs --pages 1024"
   },
   "devDependencies": {
     "electron": "33.2.1"
