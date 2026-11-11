@@ -198,13 +198,41 @@ function xyChain(bytes, nbits, origin, end) {
   }
   return pts;
 }
-// 文字放在引线末端的外侧：引线从下上来就底边对齐，从左过来就左边对齐。
-function leaderAttach(pts) {
-  if (!pts || pts.length < 2) return 7;
-  const a = pts[pts.length - 2], b = pts[pts.length - 1];
-  const dx = b[0] - a[0], dy = b[1] - a[1];
-  if (Math.abs(dy) >= Math.abs(dx)) return dy >= 0 ? 8 : 2;
-  return dx >= 0 ? 4 : 6;
+// 成对编码的数字，保留全部字符。补零的小数直接就是图形单位，不能再删字符。
+function tgAscii(s) {
+  if (!s || s.length < 2 || s.length % 2) return '';
+  let raw = '';
+  for (let i = 0; i + 1 < s.length; i += 2) {
+    const a = s.charCodeAt(i) & 0xff, b = s.charCodeAt(i + 1) & 0xff;
+    if (a < TG_KEY || a > TG_KEY + 25 || b < TG_KEY || b > TG_KEY + 25) return '';
+    raw += String.fromCharCode((((a - TG_KEY) * 26 + (b - TG_KEY)) ^ 4) & 0xff);
+  }
+  return raw;
+}
+// 三位数字里只有中间一位是值，前后两位随对象变化。
+function saltedDigit(s) {
+  return /^\d{3}$/.test(s) ? Number(s[1]) : NaN;
+}
+// 做法标注：字高、基线系数、基线长度、文字在引线的哪一侧。先读这些数，再决定线和字放哪。
+function composingFields(strs) {
+  const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
+  const ascii = strs.map(tgAscii);
+  const doubles = [];
+  ascii.forEach((a, i) => {
+    if (!/^0+\d+\.\d+$/.test(a)) return;
+    const v = parseFloat(a);
+    if (Number.isFinite(v)) doubles.push({ i, v });
+  });
+  const ints = [];
+  ascii.forEach((a, i) => { const v = saltedDigit(a); if (Number.isFinite(v)) ints.push({ i, v }); });
+  const before = doubles.filter(d => ti < 0 || d.i < ti);
+  const after = doubles.filter(d => ti >= 0 && d.i > ti);
+  const height = [...before].reverse().find(d => d.v >= 1 && d.v <= 30)?.v || 2.5;
+  const ratio = [...before].reverse().find(d => d.v > 0 && d.v < 1)?.v || 0.3;
+  const big = after.filter(d => d.v >= 20 && d.v <= 500);
+  const base = (big.find(d => d.v >= 50) || big[0])?.v || height * 3;
+  const side = [...ints].reverse().find(d => ti < 0 || d.i < ti)?.v;
+  return { height, ratio, base, side: side == null ? 1 : side };
 }
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
@@ -232,7 +260,10 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     const pts = yxChain(bytes, nbits, 134, span.start);
     if (!pts.length) return null;
     const end = pts[pts.length - 1];
-    return { kind, scale: 1, pts, x: end[0], y: end[1], z: 0, rot: 0, h, text: body };
+    const cf = composingFields(strs);
+    // 第二点是离箭头最近的那一行，不是整段文字的中心。行距按原图剖面外框标定：
+    // 外框宽 200 个图形单位，相邻两行短横线相距 11。对象里读成 7 的那个整数不是这个距离。
+    return { kind, scale: 1, pts, x: end[0], y: end[1], z: 0, rot: 0, h: cf.height, pitch: 11, tick: cf.base * cf.ratio, side: cf.side, text: body };
   }
   if (kind === 'TCH_ARROW') {
     const pts = xyChain(bytes, nbits, 86, span.start);
@@ -512,10 +543,35 @@ export function tchBuild(f, dec) {
       return out;
     }
     case 'TCH_COMPOSING': {
+      // 先用对象里的点：箭头、离箭头最近的一行。再按这个方位画竖线和每一行的短横线、文字。
+      // 文字在引线外侧，逐行排开，不压到引线上。
       const s = (f.text != null ? tchMarkup(f.text) : dec(f.raw || new Uint8Array())).trim();
+      const lines = s.split(/\r\n|\r|\n/).map(t => t.trim()).filter(Boolean);
       const pts = f.pts || [];
-      for (let i = 0; i + 1 < pts.length; i++) out.push(LN(pts[i], pts[i + 1]));
-      if (s) out.push(MT(f.x, f.y, f.h * sc, leaderAttach(pts), 0, s, 0));
+      const tip = pts[0] || [f.x, f.y];
+      const near = pts.length > 1 ? pts[pts.length - 1] : [f.x, f.y];
+      const dx = near[0] - tip[0], dy = near[1] - tip[1];
+      const len = Math.hypot(dx, dy);
+      const dir = len < 1e-6 ? [0, 1] : [dx / len, dy / len];
+      const n = Math.max(lines.length, 1);
+      const pitch = f.pitch > 0 ? f.pitch : 11;
+      const rows = [];
+      for (let i = 0; i < n; i++) {
+        const k = n - 1 - i;
+        rows.push([near[0] + dir[0] * pitch * k, near[1] + dir[1] * pitch * k]);
+      }
+      out.push(LN(tip, rows[0]));
+      const sign = f.side === 0 ? -1 : 1;
+      const perp = [dir[1] * sign, -dir[0] * sign];
+      const tick = f.tick > 0 ? f.tick : f.h * sc * 3;
+      const gap = f.h * sc;
+      lines.forEach((line, i) => {
+        const row = rows[i];
+        const end = [row[0] + perp[0] * tick, row[1] + perp[1] * tick];
+        out.push(LN(row, end));
+        const ha = perp[0] < -0.2 ? 2 : 0;
+        out.push(TXT(end[0] + perp[0] * gap, end[1] + perp[1] * gap, f.h * sc, 0, ha, 2, line));
+      });
       return out;
     }
     case 'TCH_ARROW': {

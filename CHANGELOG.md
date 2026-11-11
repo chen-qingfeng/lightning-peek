@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.11] – Preview – 2026-11-11
+
+### Fixed
+- Tianzheng section notes keep the arrow point and the nearest text row from the drawing. Text is drawn on the outer side of the leader, one row at a time, with a short tick on each row. The vertical leader runs from the arrow up through those rows.
+
 ## [0.2.10] – Preview – 2026-11-11
 
 ### Fixed
