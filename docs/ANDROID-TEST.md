@@ -14,7 +14,7 @@
 
 到 GitHub 仓库的 **Actions** 页面，打开名字叫 **「安卓验证包」**、带绿色勾的最新一次运行。页面最下面只有一个文件：
 
-**LightningPeek-android-debug**
+**LightningPeek-0.2.15-android.1-debug**
 
 下下来的是 zip。解开以后点里面的 **.apk** 安装。不要装以前的 `stock` 或 `smallmem` 包。桌面上的名字仍是「闪电看图」。验证面板默认是收起的，点「展开」才能看到数据。
 

@@ -1,7 +1,7 @@
 {
   "name": "lightning-peek-android-shell",
   "private": true,
-  "version": "0.2.13",
+  "version": "0.2.15-android.1",
   "description": "闪电看图的安卓真机验证壳。网页仍在仓库的 app/，这里只有 Capacitor。",
   "license": "GPL-3.0-or-later",
   "scripts": {

@@ -64,11 +64,11 @@ jobs:
         run: |
           src=$(find mobile/android/app/build/outputs/apk/debug -name '*.apk' | head -1)
           test -n "$src"
-          cp "$src" "LightningPeek-android-debug.apk"
+          cp "$src" "LightningPeek-0.2.15-android.1-debug.apk"
 
       - name: 上传调试包
         uses: actions/upload-artifact@v4
         with:
-          name: LightningPeek-android-debug
-          path: LightningPeek-android-debug.apk
+          name: LightningPeek-0.2.15-android.1-debug
+          path: LightningPeek-0.2.15-android.1-debug.apk
           if-no-files-found: error
