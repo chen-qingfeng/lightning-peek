@@ -237,15 +237,14 @@ function composingFields(strs) {
 // 文字后面的三位数字，中间一位是附着点，和多行文字一样：
 // 1 2 3 上沿的左/中/右，4 5 6 正中的左/中/右，7 8 9 基线的左/中/右。
 // 左右那一位决定文字从插入点向哪一侧排开。前后两位随对象变化，不能当成坐标。
-function textAnchor(strs) {
+// 只认文字后面第一组三位数字。再往后的数字可能是别的标志，不能覆盖附着点。
+export function textAnchor(strs) {
   const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
-  let digit = 0;
-  strs.forEach((s, i) => {
-    if (ti >= 0 && i <= ti) return;
-    const d = saltedDigit(tgAscii(s));
-    if (d >= 1 && d <= 9) digit = d;
-  });
-  return digit;
+  for (let i = (ti < 0 ? 0 : ti + 1); i < strs.length; i++) {
+    const d = saltedDigit(tgAscii(strs[i]));
+    if (d >= 1 && d <= 9) return d;
+  }
+  return 0;
 }
 // 7/8/9 用 10/11/12：那三个值在单行文字里是基线的左/中/右，不是正中。
 export function tchAlign(anchor) {
@@ -255,8 +254,9 @@ export function tchAlign(anchor) {
   if (anchor === 9) return 12;
   return 10;
 }
-// 上下两条引出文字的插入点只差大约 1 个图形单位，连线垂直于文字方向。
-// 插入点本身不挪。文字沿这条连线的垂线排开，右附着点的字停在插入点上。
+// 上下两条引出文字的插入点相差不到 2 个图形单位时，连线垂直于文字方向。
+// 插入点不挪。没配对、锚点又是 1–3 的单行文字保持原来的对齐，不改成上沿。
+// 有多个候选时用最近的一条，避免把旁边另一组引出文字配进来。
 export function placeSharedText(items) {
   const texts = [];
   for (const f of items) {
@@ -265,63 +265,130 @@ export function placeSharedText(items) {
     if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) continue;
     texts.push(f);
   }
-  for (const f of texts) f.align = tchAlign(f.anchor);
   for (const f of texts) {
-    if (f.rot) continue;
     const top = f.anchor <= 3;
-    const partner = texts.find(g => g !== f && (g.anchor <= 3) !== top && Math.hypot(f.x - g.x, f.y - g.y) < 3);
-    if (!partner) continue;
-    const base = top ? partner : f;
-    const other = top ? f : partner;
-    const vx = other.x - base.x, vy = other.y - base.y;
-    if (Math.hypot(vx, vy) < 1e-6) continue;
-    const upx = -vx, upy = -vy;
-    f.rot = Math.atan2(-upx, upy);
+    let partner = null, best = 2;
+    for (const g of texts) {
+      if (g === f || (g.anchor <= 3) === top) continue;
+      const d = Math.hypot(f.x - g.x, f.y - g.y);
+      if (d < best) { best = d; partner = g; }
+    }
+    if (partner) {
+      f.align = tchAlign(f.anchor);
+      if (!f.rot) {
+        const base = top ? partner : f;
+        const other = top ? f : partner;
+        const vx = other.x - base.x, vy = other.y - base.y;
+        if (Math.hypot(vx, vy) > 1e-6) {
+          const upx = -vx, upy = -vy;
+          f.rot = Math.atan2(-upx, upy);
+          f.rotFrom = 'pair';
+        }
+      }
+    } else if (f.anchor >= 4) f.align = tchAlign(f.anchor);
   }
 }
-// 布局视口里重设过用户坐标系时，没有上下配对的文字仍是按该坐标系的 X 轴书写的。
-// 只补旋转角，不改插入点。
-export function viewportUcsAngle(doc) {
-  if (!doc) return 0;
-  const angs = [];
+function hdrNum(doc, key, code, d) {
+  const h = doc && doc.header && doc.header[key];
+  if (!h) return d;
+  const it = h.find(x => x[0] === code);
+  const v = it ? parseFloat(it[1]) : NaN;
+  return Number.isFinite(v) ? v : d;
+}
+// 一个图形单位里有多少毫米。0 表示文件没写单位，不能拿来换算。
+const MM_PER_UNIT = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000, 7: 1e6, 10: 914.4 };
+// 视口：模型高 f(45) ÷ 图纸高 f(41)，再除以每图形单位的毫米数，得到「每个纸面毫米对应多少图形单位」。
+export function modelPerPaperMm(vp, insunits) {
+  if (!vp || !(vp.h > 0) || !(vp.vh > 0)) return 0;
+  const mm = MM_PER_UNIT[insunits];
+  if (!(mm > 0)) return 0;
+  return (vp.vh / vp.h) / mm;
+}
+function readViewports(doc) {
+  const out = [];
   const scan = ents => {
     if (!ents) return;
     for (const r of ents) {
       if (!r || r.type !== 'VIEWPORT' || typeof r.f !== 'function') continue;
-      const xx = r.f(111, 1), xy = r.f(121, 0);
-      if (!Number.isFinite(xx) || !Number.isFinite(xy) || Math.hypot(xx, xy) < 1e-9) continue;
-      const ang = Math.atan2(xy, xx);
-      if (Math.abs(ang) < 1e-4) continue;
-      angs.push(ang);
+      if (typeof r.i === 'function' && (r.i(90) & 131072)) continue;
+      if (typeof r.i === 'function' && r.i(69, 2) === 1) continue;
+      const h = r.f(41), vh = r.f(45), w = r.f(40);
+      if (!(h > 0) || !(vh > 0) || !(w > 0)) continue;
+      out.push({
+        h, vh, w, tx: r.f(17), ty: r.f(27), vcx: r.f(12), vcy: r.f(22),
+        twist: r.f(51) * Math.PI / 180,
+        ucs: Math.atan2(r.f(121, 0), r.f(111, 1)),
+      });
     }
   };
-  scan(doc.entities);
-  if (doc.blocks) for (const b of doc.blocks.values()) scan(b.ents);
-  return angs.length ? angs[0] : 0;
+  scan(doc && doc.entities);
+  if (doc && doc.blocks) for (const b of doc.blocks.values()) scan(b.ents);
+  return out;
 }
+// 模型点是否落在这个视口里。边缘留一成，避免刚好压在视口线上的引出文字被漏掉。
+export function viewportContains(vp, x, y) {
+  const qx = x - (vp.tx || 0), qy = y - (vp.ty || 0);
+  const c = Math.cos(vp.twist || 0), s = Math.sin(vp.twist || 0);
+  const dx = c * qx - s * qy - vp.vcx, dy = s * qx + c * qy - vp.vcy;
+  const hw = vp.vh * (vp.w / vp.h) / 2, hh = vp.vh / 2;
+  return Math.abs(dx) <= hw * 1.1 && Math.abs(dy) <= hh * 1.1;
+}
+function viewportFor(vps, x, y) {
+  const hits = vps.filter(vp => viewportContains(vp, x, y));
+  if (!hits.length) return null;
+  // 同一个模型范围可能同时落在两个布局里。有用户坐标的那个才是改过坐标系的视口。
+  const turned = hits.filter(vp => Math.abs(vp.ucs) > 1e-4);
+  const pool = turned.length ? turned : hits;
+  pool.sort((a, b) => a.vh * a.vh * (a.w / a.h) - b.vh * b.vh * (b.w / b.h));
+  return pool[0];
+}
+function headerUcsAngle(doc) {
+  const x = hdrNum(doc, '$UCSXDIR', 10, 1), y = hdrNum(doc, '$UCSXDIR', 20, 0);
+  if (!Number.isFinite(x) || !Number.isFinite(y) || Math.hypot(x, y) < 1e-9) return 0;
+  const ang = Math.atan2(y, x);
+  return Math.abs(ang) < 1e-4 ? 0 : ang;
+}
+// 只处理模型空间里的单行天正文字。图纸空间不动。多行天正文字（TCH_MTEXT）保持名义字高和左上对齐，不跟视口转。
+// 方向优先用配对点，其次文件头 $UCSXDIR，再次对象上的引线点链，最后才用文字所在视口的用户坐标横轴。
 export function orientTch(doc, tch) {
-  const ang = viewportUcsAngle(doc);
-  if (!ang || !tch || !tch.items) return;
+  if (!doc || !tch || !tch.items) return;
+  const header = headerUcsAngle(doc);
+  const vps = readViewports(doc);
+  const ins = hdrNum(doc, '$INSUNITS', 70, 0);
+  const dim = hdrNum(doc, '$DIMSCALE', 40, 0);
   for (const it of tch.items) {
     const f = it.f;
-    if (!f || f.rot) continue;
-    if (it.cls !== 'TCH_TEXT' && it.cls !== 'TCH_MTEXT') continue;
-    if (f.kind !== 'TCH_TEXT' && f.kind !== 'TCH_MTEXT') continue;
-    f.rot = ang;
+    if (!f || it.mode === 1) continue;
+    if (it.cls !== 'TCH_TEXT' || f.kind !== 'TCH_TEXT') continue;
+    if (f.paperMm > 0) {
+      const vp = viewportFor(vps, f.x, f.y);
+      const fromVp = vp ? modelPerPaperMm(vp, ins) : 0;
+      const scale = fromVp > 0 ? fromVp : (dim > 1 ? dim : 0);
+      if (scale > 0) f.h = f.paperMm * scale;
+    }
+    if (f.rot) continue;
+    if (header) { f.rot = header; f.rotFrom = 'header'; continue; }
+    if (f.pts && f.pts.length >= 2) {
+      const a = f.pts[f.pts.length - 2], b = f.pts[f.pts.length - 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len > 1e-6) { f.rot = Math.atan2(b[1] - a[1], b[0] - a[0]); f.rotFrom = 'chain'; continue; }
+    }
+    const vp = viewportFor(vps, f.x, f.y);
+    if (vp && Math.abs(vp.ucs) > 1e-4) { f.rot = vp.ucs; f.rotFrom = 'viewport'; }
   }
 }
-// 2007 引出文字里那个约 5 的数不是画出来的字高：同一档文字各自的这个数不同，
-// 炸开后的汉字字高却完全一样。文字后面第一个小数用来分档。小于 1 的是 3 毫米档，
-// 其余是 3.5 毫米档。两档再乘以本图的出图系数 68/141，得到图形单位里的字高。
-// 3 × 68/141 = 68/47，3.5 × 68/141 = 238/141。
-const TCH_DRAW_SCALE = 68 / 141;
-export function tchDrawnHeight(strs) {
+// 文字后面第一个数如果是整数，或落在 1–4，就停。那不是纸面字高，也不能跳过它去抓后面的小数。
+// 只有正好是 2.5、3、3.5、5、7、10 毫米，或 250–1000 的整百毫米，才当作纸面字高。
+// 分不到时返回 0。调用方不要把它换成字符串流里那个约 5 的名义数再拿去当图形字高。
+export function tchPaperMm(strs) {
   const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
-  for (let i = Math.max(ti, 0) + 1; i < strs.length; i++) {
+  for (let i = (ti < 0 ? 0 : ti + 1); i < strs.length; i++) {
     const v = tgNumber(strs[i]);
-    if (!(v > 0 && v < 20)) continue;
-    if (v < 1) return 3 * TCH_DRAW_SCALE;
-    if (v > 4 && Math.abs(v - Math.round(v)) > 1e-6) return 3.5 * TCH_DRAW_SCALE;
+    if (!(v > 0)) continue;
+    if (v === 2.5 || v === 3 || v === 3.5 || v === 5 || v === 7 || v === 10) return v;
+    if (v === 250 || v === 300 || v === 350 || v === 500 || v === 700 || v === 1000) return v / 100;
+    // 整数或 1–4 之间的数不是纸面字高。停在这里，不要再去抓后面的小数。
+    return 0;
   }
   return 0;
 }
@@ -368,8 +435,10 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
   const anchor = textAnchor(strs);
-  const drawn = !multi ? tchDrawnHeight(strs) : 0;
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h: drawn > 0 ? drawn : h, align: multi ? 1 : tchAlign(anchor), anchor, width: 0, text: body };
+  // 多行仍用名义字高和左上对齐。单行只有读到纸面字高才记下，等 orientTch 按所在视口换算。
+  // 换算不成时保留名义高度，调用方不要再乘一个写死的系数。
+  const paperMm = !multi ? tchPaperMm(strs) : 0;
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, paperMm, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------

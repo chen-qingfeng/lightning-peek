@@ -1,7 +1,7 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, tchDrawnHeight, orientTch } from '../app/renderer/core/tarch.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, tchPaperMm, modelPerPaperMm, orientTch, textAnchor } from '../app/renderer/core/tarch.js';
 import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
 
 class W {
@@ -208,34 +208,150 @@ test('baseline-right Tianzheng text stays on the stored point', () => {
   assert.equal(g[73], 0);
 });
 
-test('2007 leader text height follows the 3 mm and 3.5 mm paper sizes', () => {
-  const enc = s => {
-    const raw = 'A' + s[0] + 'B' + s.slice(1);
-    let out = '';
-    for (const ch of raw) {
-      const v = ch.charCodeAt(0) ^ 4;
-      out += String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26));
-    }
-    return out;
-  };
-  const small = tchDrawnHeight(['平直段', enc('0.131')]);
-  const big = tchDrawnHeight(['拆除', enc('5.439')]);
-  assert.ok(Math.abs(small - 3 * 68 / 141) < 1e-12, small);
-  assert.ok(Math.abs(big - 3.5 * 68 / 141) < 1e-12, big);
-  assert.ok(Math.abs(small - 1.446808510638298) < 1e-12);
-  assert.ok(Math.abs(big - 1.6879432624113475) < 1e-9);
+function encNum(s) {
+  const raw = 'A' + s[0] + 'B' + s.slice(1);
+  let out = '';
+  for (const ch of raw) {
+    const v = ch.charCodeAt(0) ^ 4;
+    out += String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26));
+  }
+  return out;
+}
+const pairCh = ch => { const v = ch.charCodeAt(0) ^ 4; return String.fromCharCode(0x324 + Math.floor(v / 26), 0x324 + (v % 26)); };
+const encDigits = s => [...s].map(pairCh).join('');
+
+test('paper height stops on an integer or a 1–4 value and does not read the next field', () => {
+  assert.equal(tchPaperMm(['平直段', encNum('0.131'), encNum('5.439')]), 0);
+  assert.equal(tchPaperMm(['拆除', encNum('5.439')]), 0);
+  assert.equal(tchPaperMm(['注', encDigits('A8'), encNum('3.5')]), 0);
+  assert.equal(tchPaperMm(['注', encDigits('A7')]), 7);
+  assert.equal(tchPaperMm(['注', encNum('2'), encNum('5.5')]), 0);
+  assert.equal(tchPaperMm(['注', encNum('3.5')]), 3.5);
+  assert.equal(tchPaperMm(['注', encNum('3')]), 3);
+  assert.equal(tchPaperMm(['注', encNum('350')]), 3.5);
 });
 
-test('a layout viewport UCS rotates flat Tianzheng text without moving the insertion point', () => {
-  const f = { kind: 'TCH_TEXT', x: 567716.85, y: 4786708.26, rot: 0, anchor: 7, align: 10 };
-  const kept = { kind: 'TCH_TEXT', x: 1, y: 2, rot: 0.4, anchor: 7, align: 10 };
+test('viewport scale is model height over paper height, converted by insertion units', () => {
+  const vp = { h: 200, vh: 100, w: 200 };
+  assert.equal(modelPerPaperMm(vp, 4), 0.5);
+  assert.equal(modelPerPaperMm(vp, 6), 0.0005);
+  assert.equal(modelPerPaperMm(vp, 0), 0);
+});
+
+test('each viewport scales the text that falls inside it', () => {
+  const f = (codes) => (c, d = 0) => codes[c] ?? d;
   const doc = {
-    entities: [{ type: 'VIEWPORT', f: (c, d = 0) => ({ 111: 0.10001, 121: -0.99499 }[c] ?? d) }],
+    header: { $INSUNITS: [[70, '4']], $DIMSCALE: [[40, '100']], $UCSXDIR: [[10, '1'], [20, '0']] },
+    entities: [
+      { type: 'VIEWPORT', i: () => 2, f: f({ 40: 10, 41: 10, 45: 20, 12: 0, 22: 0, 17: 0, 27: 0, 51: 0, 111: Math.cos(0.4), 121: Math.sin(0.4) }) },
+      { type: 'VIEWPORT', i: () => 2, f: f({ 40: 10, 41: 10, 45: 50, 12: 100, 22: 100, 17: 0, 27: 0, 51: 0, 111: 0, 121: 1 }) },
+    ],
     blocks: new Map(),
   };
-  orientTch(doc, { items: [{ cls: 'TCH_TEXT', f }, { cls: 'TCH_TEXT', f: kept }, { cls: 'TCH_SYMB_SECTION', f: { kind: 'TCH_MTEXT', x: 3, y: 4, rot: 0 } }] });
-  assert.ok(Math.abs(f.rot - Math.atan2(-0.99499, 0.10001)) < 1e-12);
-  assert.equal(f.x, 567716.85);
-  assert.equal(f.y, 4786708.26);
+  const near = { kind: 'TCH_TEXT', x: 1, y: 1, h: 5, paperMm: 3.5, rot: 0, anchor: 7, align: 10 };
+  const far = { kind: 'TCH_TEXT', x: 100, y: 100, h: 5, paperMm: 3.5, rot: 0, anchor: 7, align: 10 };
+  const paper = { kind: 'TCH_TEXT', x: 1, y: 1, h: 5, paperMm: 3.5, rot: 0, anchor: 7, align: 10 };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', mode: 2, f: near }, { cls: 'TCH_TEXT', mode: 2, f: far }, { cls: 'TCH_TEXT', mode: 1, f: paper }] });
+  assert.ok(Math.abs(near.h - 7) < 1e-9, near.h);
+  assert.ok(Math.abs(far.h - 17.5) < 1e-9, far.h);
+  assert.equal(paper.h, 5);
+  assert.equal(paper.rot, 0);
+  assert.equal(near.rotFrom, 'viewport');
+  assert.ok(Math.abs(near.rot - 0.4) < 1e-9);
+  assert.ok(Math.abs(far.rot - Math.PI / 2) < 1e-9);
+});
+
+test('without a viewport, a DIMSCALE above 1 scales a stored paper height', () => {
+  const f = { kind: 'TCH_TEXT', x: 0, y: 0, h: 5, paperMm: 3.5, rot: 0, anchor: 7, align: 10 };
+  const doc = { header: { $INSUNITS: [[70, '4']], $DIMSCALE: [[40, '100']], $UCSXDIR: [[10, '1'], [20, '0']] }, entities: [], blocks: new Map() };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', mode: 2, f }] });
+  assert.ok(Math.abs(f.h - 350) < 1e-9, f.h);
+  assert.equal(f.rot, 0);
+});
+
+test('when two viewports cover one point, the one with a user axis wins', () => {
+  const f = (codes) => (c, d = 0) => codes[c] ?? d;
+  const doc = {
+    header: { $UCSXDIR: [[10, '1'], [20, '0']] },
+    entities: [
+      { type: 'VIEWPORT', i: () => 2, f: f({ 40: 20, 41: 20, 45: 20, 12: 0, 22: 0, 17: 0, 27: 0, 51: 0, 111: 1, 121: 0 }) },
+      { type: 'VIEWPORT', i: () => 2, f: f({ 40: 20, 41: 20, 45: 20, 12: 0, 22: 0, 17: 0, 27: 0, 51: 0, 111: Math.cos(0.4), 121: Math.sin(0.4) }) },
+    ],
+    blocks: new Map(),
+  };
+  const note = { kind: 'TCH_TEXT', x: 1, y: 1, h: 2, rot: 0, anchor: 7, align: 10 };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', mode: 2, f: note }] });
+  assert.equal(note.rotFrom, 'viewport');
+  assert.ok(Math.abs(note.rot - 0.4) < 1e-9);
+});
+
+test('a drawing without a rotated viewport leaves ordinary text horizontal', () => {
+  const f = { kind: 'TCH_TEXT', x: 10, y: 10, h: 5, rot: 0, anchor: 7, align: 10 };
+  const doc = { header: { $UCSXDIR: [[10, '1'], [20, '0']] }, entities: [], blocks: new Map() };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', mode: 2, f }, { cls: 'TCH_MTEXT', mode: 2, f: { kind: 'TCH_MTEXT', x: 1, y: 1, rot: 0 } }] });
+  assert.equal(f.rot, 0);
+});
+
+test('header UCS is used before a viewport, and a chain before either when already absent', () => {
+  const chained = { kind: 'TCH_TEXT', x: 0, y: 0, h: 2, rot: 0, anchor: 7, align: 10, pts: [[0, 0], [1, 1]] };
+  const doc = {
+    header: { $UCSXDIR: [[10, '0'], [20, '1']] },
+    entities: [{ type: 'VIEWPORT', i: () => 2, f: (c, d = 0) => ({ 40: 10, 41: 10, 45: 10, 12: 0, 22: 0, 17: 0, 27: 0, 51: 0, 111: 1, 121: 0 }[c] ?? d) }],
+    blocks: new Map(),
+  };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', mode: 2, f: chained }] });
+  assert.equal(chained.rotFrom, 'header');
+  assert.ok(Math.abs(chained.rot - Math.PI / 2) < 1e-9);
+  const onlyChain = { kind: 'TCH_TEXT', x: 0, y: 0, h: 2, rot: 0, anchor: 7, align: 10, pts: [[0, 0], [0, 2]] };
+  orientTch({ header: { $UCSXDIR: [[10, '1'], [20, '0']] }, entities: [], blocks: new Map() }, { items: [{ cls: 'TCH_TEXT', mode: 2, f: onlyChain }] });
+  assert.equal(onlyChain.rotFrom, 'chain');
+  assert.ok(Math.abs(onlyChain.rot - Math.PI / 2) < 1e-9);
+});
+
+test('anchors 4–6 set alignment, an unpaired 1–3 anchor does not, and the nearest partner wins', () => {
+  assert.equal(tchAlign(4), 4);
+  assert.equal(tchAlign(5), 5);
+  assert.equal(tchAlign(6), 6);
+  const mid = { kind: 'TCH_TEXT', x: 0, y: 0, h: 2, rot: 0, anchor: 5, align: 10 };
+  const lone = { kind: 'TCH_TEXT', x: 30, y: 30, h: 2, rot: 0, anchor: 3, align: 10 };
+  const host = { kind: 'TCH_TEXT', x: 0, y: 0, h: 2, rot: 0, anchor: 7, align: 10 };
+  const close = { kind: 'TCH_TEXT', x: 0.4, y: 0, h: 2, rot: 0, anchor: 1, align: 10 };
+  const farther = { kind: 'TCH_TEXT', x: 0, y: 1.6, h: 2, rot: 0, anchor: 1, align: 10 };
+  placeSharedText([mid, lone, host, close, farther]);
+  assert.equal(mid.align, 5);
+  assert.equal(lone.align, 10);
+  assert.equal(lone.rot, 0);
+  const alongX = Math.atan2(0.4, 0);
+  assert.ok(Math.abs(host.rot - alongX) < 1e-9, host.rot);
+  assert.equal(host.rotFrom, 'pair');
+  assert.ok(Math.abs(close.x - 0.4) < 1e-9);
+});
+
+test('text anchor is the first 3-digit code after the words, not a later one', () => {
+  assert.equal(textAnchor(['注', encDigits('076'), encDigits('395')]), 7);
+  assert.equal(textAnchor(['注', encDigits('102')]), 0);
+});
+
+test('a layout viewport UCS rotates only model text inside that viewport', () => {
+  const ang = Math.atan2(-0.99499, 0.10001);
+  const f = { kind: 'TCH_TEXT', x: 1, y: 1, h: 2, rot: 0, anchor: 7, align: 10 };
+  const outside = { kind: 'TCH_TEXT', x: 80, y: 80, h: 2, rot: 0, anchor: 7, align: 10 };
+  const kept = { kind: 'TCH_TEXT', x: 1, y: 1, h: 2, rot: 0.4, anchor: 7, align: 10 };
+  const doc = {
+    header: { $UCSXDIR: [[10, '1'], [20, '0']] },
+    entities: [{ type: 'VIEWPORT', i: () => 2, f: (c, d = 0) => ({ 40: 20, 41: 20, 45: 20, 12: 0, 22: 0, 17: 0, 27: 0, 51: 0, 111: 0.10001, 121: -0.99499 }[c] ?? d) }],
+    blocks: new Map(),
+  };
+  orientTch(doc, {
+    items: [
+      { cls: 'TCH_TEXT', mode: 2, f },
+      { cls: 'TCH_TEXT', mode: 2, f: outside },
+      { cls: 'TCH_TEXT', mode: 2, f: kept },
+      { cls: 'TCH_MTEXT', mode: 2, f: { kind: 'TCH_MTEXT', x: 1, y: 1, rot: 0 } },
+    ],
+  });
+  assert.ok(Math.abs(f.rot - ang) < 1e-12);
+  assert.equal(f.x, 1);
+  assert.equal(outside.rot, 0);
   assert.equal(kept.rot, 0.4);
 });
