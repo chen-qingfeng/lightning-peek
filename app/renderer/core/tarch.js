@@ -112,6 +112,7 @@ export function tgNumber(s) {
     if (a < TG_KEY || a > TG_KEY + 25 || b < TG_KEY || b > TG_KEY + 25) return NaN;
     raw += String.fromCharCode((((a - TG_KEY) * 26 + (b - TG_KEY)) ^ 4) & 0xff);
   }
+  raw = [...raw].reverse().join('');
   const cut = raw.length < 4 ? (raw[1] || '') : raw[1] + raw.slice(3);
   if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(cut)) return NaN;
   const v = parseFloat(cut);
@@ -276,7 +277,7 @@ export function placeSharedText(items) {
     }
     if (partner) {
       f.align = tchAlign(f.anchor);
-      if (!f.rot) {
+      if (!f.rot && f.rotFrom !== 'stream') {
         const base = top ? partner : f;
         const other = top ? f : partner;
         const vx = other.x - base.x, vy = other.y - base.y;
@@ -366,6 +367,7 @@ export function orientTch(doc, tch) {
     // 2000/2004 走 decodeTch，自带 rot 和 align，没有 anchor。
     // rot 为 0 时挡不住，会被所在视口的用户坐标转掉。只处理字符串流解出来的文字。
     if (f.anchor === undefined) continue;
+    if (f.rotFrom === 'stream') continue;
     if (f.rot && f.rotFrom !== 'pair') continue;
     const vp = viewportFor(vps, f.x, f.y);
     const viewUcs = vp && Math.abs(vp.ucs) > 1e-4 ? vp.ucs : 0;
@@ -383,19 +385,6 @@ export function orientTch(doc, tch) {
     if (header) continue;
     if (viewUcs) { f.rot = viewUcs; f.rotFrom = 'viewport'; }
   }
-}
-// 2007 引出文字里那个约 5 的数不是画出来的字高。文字后面第一个小数用来分档。
-const TCH_DRAW_SCALE = 68 / 141;
-export function tchDrawnHeight(strs) {
-  const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
-  for (let i = Math.max(ti, 0) + 1; i < strs.length; i++) {
-    const v = tgNumber(strs[i]);
-    if (!(v > 0 && v < 20)) continue;
-    if (v < 1) return 3 * TCH_DRAW_SCALE;
-    if (v > 4 && Math.abs(v - Math.round(v)) > 1e-6) return 3.5 * TCH_DRAW_SCALE;
-    return 0;
-  }
-  return 0;
 }
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
@@ -418,7 +407,9 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
   } catch (e) { return null; }
   const body = texts.join('\n');
   const multi = /[\r\n]/.test(body) || texts.length > 1;
-  const h = heightAt(strs, 2, 0.8, 20, multi ? 2.5 : 2);
+  const ti = strs.findIndex(tgHuman);
+  const scale = heightAt(strs, 2, 1e-6, 1e5, 1);
+  const h = heightAt(strs, ti + 1, 0.1, 1000, multi ? 2.5 : 2);
   if (kind === 'TCH_COMPOSING') {
     const pts = yxChain(bytes, nbits, 134, span.start);
     if (!pts.length) return null;
@@ -432,7 +423,9 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     const pts = xyChain(bytes, nbits, 86, span.start);
     if (!pts.length) return null;
     const end = pts[pts.length - 1];
-    return { kind, scale: 1, pts, x: end[0], y: end[1], z: 0, rot: 0, h, text: body };
+    // 前两点是文字承托段，末点是箭头；文字不能放到箭头上。
+    const textHeight = heightAt(strs, ti - 4, 0.1, 1000, h);
+    return { kind, scale, pts, x: end[0], y: end[1], z: 0, rot: 0, h: textHeight, text: body, landingText: true };
   }
   if (!onSheet(x) || !onSheet(y)) return null;
   if (kind === 'TCH_DRAWINGNAME') {
@@ -440,12 +433,11 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
   const anchor = textAnchor(strs);
-  // 单行引出文字不用字符串流里那个约 5 的名义值。那个数同一档里各不相同，炸开后的汉字字高却只有两档。
-  // 文字后面第一个 0–20 的数用来分档：小于 1 是 3 毫米，大于 4 的小数是 3.5 毫米。
-  // 再乘这张图炸开后核对出来的出图系数 68/141。3×68/141 = 1.446808510638298，3.5×68/141 = 1.687943262411348。
-  // 多行文字和分不到档的仍用名义值。旧格式文字不走这里。
-  const drawn = !multi ? tchDrawnHeight(strs) : 0;
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h: drawn > 0 ? drawn : h, align: multi ? 1 : (anchor >= 4 ? tchAlign(anchor) : 10), anchor, width: 0, text: body };
+  const angle = tgNumber(strs[ti + 2]);
+  const baseAngle = tgNumber(strs[3]);
+  const validAngle = Number.isFinite(angle) && Math.abs(angle) <= 2 * Math.PI;
+  const rot = validAngle ? angle + (Number.isFinite(baseAngle) && Math.abs(baseAngle) <= 2 * Math.PI ? baseAngle : 0) : 0;
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale, x, y, z: 0, rot, rotFrom: validAngle ? 'stream' : undefined, h, align: multi ? 1 : tchAlign(anchor), anchor, width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------
@@ -747,6 +739,15 @@ export function tchBuild(f, dec) {
       const s = (f.text != null ? tchMarkup(f.text) : dec(f.raw || new Uint8Array())).trim();
       let rot = 0;
       if (f.pts && f.pts.length >= 2) { rot = readable(Math.atan2(f.pts[1][1] - f.pts[0][1], f.pts[1][0] - f.pts[0][0])); for (let i = 0; i + 1 < f.pts.length; i++) out.push(LN(f.pts[i], f.pts[i + 1])); }
+      if (f.landingText && f.pts.length >= 2) {
+        const a = f.pts[0], b = f.pts[1], x = (a[0] + b[0]) / 2, y = (a[1] + b[1]) / 2;
+        const nx = -Math.sin(rot), ny = Math.cos(rot), H = f.h * sc;
+        s.split(/\r\n|\r|\n/).forEach((line, i) => {
+          const gap = i === 0 ? sc : -sc - (i - 1) * (H + sc);
+          if (line) out.push(TXT(x + nx * gap, y + ny * gap, H, rot, 1, i === 0 ? 0 : 3, line));
+        });
+        return out;
+      }
       if (s) out.push(TXT(f.x, f.y, f.h * sc, rot, 1, 1, s));
       return out;
     }
