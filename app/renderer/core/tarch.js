@@ -234,6 +234,37 @@ function composingFields(strs) {
   const side = [...ints].reverse().find(d => ti < 0 || d.i < ti)?.v;
   return { height, ratio, base, side: side == null ? 1 : side };
 }
+// 文字后面的三位数字，中间一位是附着点。1、2、3 表示插入点在字形上沿，7、8、9 表示插入点在基线。
+// 前后两位随对象变化，不能当成坐标。
+function textAnchor(strs) {
+  const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
+  let top = false, bot = false;
+  strs.forEach((s, i) => {
+    if (ti >= 0 && i <= ti) return;
+    const d = saltedDigit(tgAscii(s));
+    if (d >= 1 && d <= 3) top = true;
+    else if (d >= 7 && d <= 9) bot = true;
+  });
+  if (top === bot) return 0;
+  return top ? 1 : 7;
+}
+// 两条文字的插入点几乎重合时，按各自的附着点分别画在这个点的上方和下方。
+// 插入点本身不挪，字高不放大。已经分开的文字保持基线落在自己的点上。
+export function placeSharedText(items) {
+  const texts = [];
+  for (const f of items) {
+    if (!f || (f.kind !== 'TCH_TEXT' && f.kind !== 'TCH_MTEXT')) continue;
+    if (f.anchor !== 1 && f.anchor !== 7) continue;
+    if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) continue;
+    texts.push(f);
+  }
+  for (const f of texts) {
+    // 叠在一起的两条，插入点只差大约 1 个图形单位。真正换行的两条至少隔着一个字高。
+    const share = texts.some(g => g !== f && (f.anchor === 1) !== (g.anchor === 1) && Math.hypot(f.x - g.x, f.y - g.y) < 2);
+    if (!share) continue;
+    f.align = f.anchor === 1 ? 1 : 10;
+  }
+}
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
   let span, strs;
@@ -276,7 +307,7 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     const tall = strs.map(tgNumber).filter(v => v >= 4 && v <= 15);
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : 10, width: 0, text: body };
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : 10, anchor: textAnchor(strs), width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------
@@ -669,8 +700,12 @@ export function extractTch(m, dwg, hex, mode = true) {
       items.push({ f, cls: name, mode, owner, layer, color, style: f.style ? hex(f.style) : '' });
     } catch (e) {
       failed[name] = (failed[name] || 0) + 1;
-      if (/memory access out of bounds/.test(String(e && e.message || e))) return { items, counts, failed, decoded: decode, trap: true };
+      if (/memory access out of bounds/.test(String(e && e.message || e))) {
+        placeSharedText(items.map(it => it.f));
+        return { items, counts, failed, decoded: decode, trap: true };
+      }
     }
   }
+  placeSharedText(items.map(it => it.f));
   return { items, counts, failed, decoded: decode };
 }

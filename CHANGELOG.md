@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.13] – Preview – 2026-11-11
+
+### Fixed
+- Two Tianzheng notes that share one insertion point are drawn from that point. The stored attachment digit says whether the point is the top of the glyphs or the baseline, so one note sits above the point and the other below it. Notes that already have different coordinates stay on those coordinates. Text height is the height stored on the object.
+
 ## [0.2.12] – Preview – 2026-11-11
 
 ### Changed

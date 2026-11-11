@@ -1,7 +1,7 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild } from '../app/renderer/core/tarch.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText } from '../app/renderer/core/tarch.js';
 import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
 
 class W {
@@ -166,4 +166,24 @@ test('2007 composing note sits to the right of the leader, on the stored row', (
   assert.equal(note[73], 2);
   assert.ok(note[10] > 575143);
   assert.ok(Math.abs(note[20] - 4787156) < 1e-3);
+});
+
+test('two Tianzheng notes on one stored point use the attachment digit, and a separated note stays put', () => {
+  const above = { kind: 'TCH_TEXT', scale: 1, x: 567762.72, y: 4786619.42, h: 5.401, align: 10, anchor: 7, text: '停车场' };
+  const below = { kind: 'TCH_TEXT', scale: 1, x: 567761.72, y: 4786619.31, h: 5.309, align: 10, anchor: 1, text: '拆除' };
+  const apart = { kind: 'TCH_TEXT', scale: 1, x: 567754.26, y: 4786684.30, h: 5.604, align: 10, anchor: 7, text: '巷道' };
+  placeSharedText([above, below, apart]);
+  assert.equal(above.align, 10);
+  assert.equal(below.align, 1);
+  assert.equal(apart.align, 10);
+  assert.equal(above.y, 4786619.42);
+  assert.equal(below.y, 4786619.31);
+  assert.equal(above.h, 5.401);
+  const low = tchBuild(below, () => { throw new Error('already decoded'); })[0];
+  const g = Object.fromEntries(low.pairs);
+  assert.equal(g[10], 567761.72);
+  assert.equal(g[20], 4786619.31);
+  assert.equal(g[40], 5.309);
+  assert.equal(g[72], 0);
+  assert.equal(g[73], 3);
 });
