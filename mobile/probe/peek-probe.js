@@ -118,7 +118,7 @@ function stopSampling() {
 }
 
 window.__peek = {
-  dedicatedWasm: !!ls('peek.dedicated', false),
+  dedicatedWasm: ls('peek.dedicated', true) !== false,
   on(ev, data) {
     if (ev === 'read-start') {
       current = { name: data.name || '', t0: performance.now(), bytes: data.bytes || 0 };
@@ -208,7 +208,7 @@ function runText(row, i) {
     'wasm 编译：' + fmtMs(info.wasmCompileMs) + (info.workerAgeMs != null ? '，线程已运行 ' + fmtMs(info.workerAgeMs) : ''),
     '冷热：' + (info.wasmCompileMs > 20 ? '冷（这次编译了 wasm）' : '热（wasm 已经在）'),
     'wasm：' + fmtBytes(info.wasmBefore) + ' → ' + fmtBytes(info.wasmBytes) + grew,
-    info.wasmOverlap ? '非专用：转换后立刻再加载一份 wasm，旧的要等回收，两份会叠一会儿' : '专用转换：转完即丢掉那份 wasm',
+    info.wasmBytes ? (info.wasmOverlap ? '非专用：转换后立刻再加载一份 wasm，旧的要等回收，两份会叠一会儿' : '专用转换：转完即丢掉那份 wasm') : '',
     memLine('转换前', info.mem && info.mem.before),
     memLine('转换后', info.mem && info.mem.afterConvert),
     memLine('解析后', info.mem && info.mem.afterParse),
@@ -249,7 +249,7 @@ function mount() {
     <header>
       <strong>验证数据</strong>
       <button type="button" id="peek-copy">复制</button>
-      <button type="button" id="peek-fold">收起</button>
+      <button type="button" id="peek-fold">展开</button>
     </header>
     <div class="body">
       <div class="meta"></div>
@@ -257,6 +257,7 @@ function mount() {
       <div class="samples"></div>
       <textarea readonly></textarea>
     </div>`;
+  root.classList.add('collapsed');
   document.body.appendChild(root);
   const box = root.querySelector('textarea');
   const dedicated = root.querySelector('#peek-dedicated');

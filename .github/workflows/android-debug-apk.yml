@@ -9,14 +9,6 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: stock
-            pages: "0"
-          - name: smallmem
-            pages: "1024"
     steps:
       - name: 取出代码
         uses: actions/checkout@v4
@@ -55,12 +47,7 @@ jobs:
         run: npm ci
 
       - name: 复制网页
-        run: |
-          if [ "${{ matrix.pages }}" = "0" ]; then
-            node tools/sync-android-www.mjs
-          else
-            node tools/sync-android-www.mjs --pages ${{ matrix.pages }}
-          fi
+        run: node tools/sync-android-www.mjs --pages 1024
 
       - name: 同步到安卓工程
         working-directory: mobile
@@ -77,11 +64,11 @@ jobs:
         run: |
           src=$(find mobile/android/app/build/outputs/apk/debug -name '*.apk' | head -1)
           test -n "$src"
-          cp "$src" "LightningPeek-android-${{ matrix.name }}-debug.apk"
+          cp "$src" "LightningPeek-android-debug.apk"
 
       - name: 上传调试包
         uses: actions/upload-artifact@v4
         with:
-          name: LightningPeek-android-${{ matrix.name }}-debug
-          path: LightningPeek-android-${{ matrix.name }}-debug.apk
+          name: LightningPeek-android-debug
+          path: LightningPeek-android-debug.apk
           if-no-files-found: error
