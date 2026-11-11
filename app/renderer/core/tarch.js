@@ -649,7 +649,8 @@ const CJKR = /[⺀-鿿豈-﫿＀-￯]/;
 const estW = (s, h) => { let w = 0; for (const ch of s) w += CJKR.test(ch) ? h : h * 0.7; return w; };
 const add = (a, b, k = 1) => [a[0] + b[0] * k, a[1] + b[1] * k];
 // 引注显示降低一档；保留解码字高和对象比例，线段几何不随字号改变。
-const annotationHeight = h => h >= 1 ? h - 0.5 : h;
+// 2 以上减半档（3.5→3、3→2.5、2→1.5）；更小的字按同样的 3/4 比例缩，1 显示成 0.75，不会被减成一半。
+export const annotationHeight = h => h >= 2 ? h - 0.5 : h * 0.75;
 // 让文字朝上可读：方向角落在 (-90°, 90°]
 function readable(a) { let r = a % (2 * Math.PI); if (r < 0) r += 2 * Math.PI; if (r > Math.PI / 2 + 1e-6 && r <= 3 * Math.PI / 2 + 1e-6) r -= Math.PI; return r; }
 
@@ -837,17 +838,19 @@ export function tchUnsupported(tch) {
   if (!tch) return out;
   const drawn = new Set((tch.items || []).map(it => it.cls).filter(Boolean));
   for (const [k, v] of Object.entries(tch.counts || {})) {
-    if (/^TCH_/.test(k) && !drawn.has(k) && (!tch.decoded || !TCH_CLASSES.has(k))) out[k] = v;
+    // 2007 只解字符串流里的几类。别的类虽然 2000/2004 能画，这里没有去读，同样要提示。
+    const skipped = tch.untried && tch.untried[k] > 0;
+    if (/^TCH_/.test(k) && !drawn.has(k) && (!tch.decoded || !TCH_CLASSES.has(k) || skipped)) out[k] = v;
   }
   if (tch.decoded) for (const [k, v] of Object.entries(tch.failed || {})) if (v > 0) out[k + '未支持'] = v;
   return out;
 }
-// 返回 { items: [{ f, layer, color, style, mode, owner }], counts: { 类名: 个数 }, failed: { 类名: 个数 } }
+// 返回 { items: [{ f, layer, color, style, mode, owner }], counts: { 类名: 个数 }, failed: { 类名: 个数 }, untried: { 没去读的类名: 个数 } }
 const STREAM_CLASSES = new Set(['TCH_TEXT', 'TCH_MTEXT', 'TCH_MULTILEADER', 'TCH_ARROW', 'TCH_COMPOSING', 'TCH_SYMB_SECTION', 'TCH_DRAWINGNAME']);
 export function extractTch(m, dwg, hex, mode = true) {
   const stream = mode === 2;
   const decode = stream || mode === true || mode === 1;
-  const items = [], counts = {}, failed = {};
+  const items = [], counts = {}, failed = {}, untried = {};
   const nc = m.dwg_get_num_classes(dwg); const cls = new Map();
   for (let i = 0; i < nc; i++) { const c = m.dwg_get_class(dwg, i); if (c) cls.set(c.num, String(c.dxfname || '').replace(/\0+$/, '')); }
   if (!m.HEAPU32 || !m.HEAPU8) return { items, counts, failed, decoded: false };
@@ -860,7 +863,7 @@ export function extractTch(m, dwg, hex, mode = true) {
       name = cls.get(m.dwg_object_get_type(obj)) || '?';
       counts[name] = (counts[name] || 0) + 1;
       const known = stream ? STREAM_CLASSES.has(name) : TCH_CLASSES.has(name);
-      if (!decode || !known) continue;
+      if (!decode || !known) { if (decode) untried[name] = (untried[name] || 0) + 1; continue; }
       const U = m.HEAPU32, B = m.HEAPU8; // wasm 内存可能在循环中扩容，每次重新取视图
       const w = obj >> 2;
       // Dwg_Object: [0] size [2] type [4] fixedtype [18] bitsize [27] num_unknown_bits [28] unknown_bits
@@ -885,10 +888,10 @@ export function extractTch(m, dwg, hex, mode = true) {
       failed[name] = (failed[name] || 0) + 1;
       if (/memory access out of bounds/.test(String(e && e.message || e))) {
         placeSharedText(items.map(it => it.f));
-        return { items, counts, failed, decoded: decode, trap: true };
+        return { items, counts, failed, untried, decoded: decode, trap: true };
       }
     }
   }
   placeSharedText(items.map(it => it.f));
-  return { items, counts, failed, decoded: decode };
+  return { items, counts, failed, untried, decoded: decode };
 }

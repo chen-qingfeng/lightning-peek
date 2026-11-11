@@ -123,12 +123,16 @@ ipcMain.handle('read-file', async (e, p) => {
   if (st.size > 400 * 1024 * 1024) throw new Error(tm('文件超过 400MB'));
   return new Uint8Array(await fs.promises.readFile(p));
 });
-ipcMain.handle('read-text', async (e, p) => { if (!isMarks(p)) return null; try { return await fs.promises.readFile(p, 'utf8'); } catch (err) { return null; } });
+// 只读图纸旁的标注文件，或用户刚在「导入标注」对话框里选的那个文件
+const pickedMarks = new Set();
+ipcMain.handle('read-text', async (e, p) => { if (!isMarks(p) || !(isSidecar(p) || pickedMarks.has(path.resolve(p)))) return null; try { return await fs.promises.readFile(p, 'utf8'); } catch (err) { return null; } });
 ipcMain.handle('write-text', async (e, p, text) => { if (!isSidecar(p)) throw new Error(tm('不允许写入该位置')); await fs.promises.writeFile(p, text, 'utf8'); return true; });
 ipcMain.on('write-text-sync', (e, p, text) => { try { if (isSidecar(p)) fs.writeFileSync(p, text, 'utf8'); e.returnValue = true; } catch (err) { e.returnValue = false; } });
 ipcMain.handle('open-any', async (e, opt = {}) => {
   const r = await dialog.showOpenDialog(win, { title: tm('选择文件'), properties: ['openFile'], filters: [{ name: opt.name || tm('文件'), extensions: opt.ext || ['*'] }] });
-  return r.canceled ? [] : r.filePaths;
+  if (r.canceled) return [];
+  for (const f of r.filePaths) if (isMarks(f)) pickedMarks.add(path.resolve(f));
+  return r.filePaths;
 });
 ipcMain.handle('get-settings', () => { const s = loadSettings(); delete s.window; return s; });
 
@@ -268,7 +272,8 @@ ipcMain.handle('font-copy', () => {
   forgetFonts();
   return { copied: n, dest };
 });
-ipcMain.handle('set-settings', (e, obj) => { const s = loadSettings(); saveSettings({ ...s, ...obj, window: s.window, lastDir: s.lastDir, lastSaveDir: s.lastSaveDir }); return true; });
+// 转换器路径和字体文件夹只能经主进程自己的对话框改，页面传来的值不收
+ipcMain.handle('set-settings', (e, obj) => { const s = loadSettings(); saveSettings({ ...s, ...obj, window: s.window, lastDir: s.lastDir, lastSaveDir: s.lastSaveDir, odaPath: s.odaPath, fontDirs: s.fontDirs }); return true; });
 ipcMain.handle('save-bytes', async (e, name, bytes) => {
   const s = loadSettings();
   const ext = path.extname(name).slice(1).toLowerCase();
@@ -284,10 +289,11 @@ ipcMain.handle('reveal', (e, p) => { if (isDrawing(p) || isMarks(p)) shell.showI
 // ---- 另存为 DWG：交给用户自己安装的 ODA File Converter（免费工具，不随本软件分发）----
 const ODA_URL = 'https://www.opendesign.com/guestfiles/oda_file_converter';
 const ODA_VERS = ['ACAD2018', 'ACAD2013', 'ACAD2010', 'ACAD2007', 'ACAD2004', 'ACAD2000'];
+const odaName = (p) => process.platform !== 'win32' || /^ODAFileConverter.*\.exe$/i.test(path.basename(p));
 function findOda() {
   const s = loadSettings();
   if (process.env.LPEEK_ODA && fs.existsSync(process.env.LPEEK_ODA)) return process.env.LPEEK_ODA; // 测试用
-  if (s.odaPath && fs.existsSync(s.odaPath)) return s.odaPath;
+  if (typeof s.odaPath === 'string' && odaName(s.odaPath) && fs.existsSync(s.odaPath)) return s.odaPath;
   const roots = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.ProgramW6432, process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')].filter(Boolean);
   const found = [];
   for (const r of [...new Set(roots)]) {
@@ -306,7 +312,7 @@ ipcMain.handle('oda-page', () => shell.openExternal(ODA_URL));
 ipcMain.handle('oda-pick', async () => {
   const r = await dialog.showOpenDialog(win, { title: tm('选择 ODAFileConverter.exe'), properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'ODAFileConverter', extensions: ['exe'] }] : [] });
   const p = r.filePaths && r.filePaths[0];
-  if (!p || (process.platform === 'win32' && !/^ODAFileConverter.*\.exe$/i.test(path.basename(p)))) return '';
+  if (!p || !odaName(p)) return '';
   const s = loadSettings(); s.odaPath = p; saveSettings(s); return p;
 });
 ipcMain.handle('save-dwg', async (e, name, dxfBytes, ver) => {

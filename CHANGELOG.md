@@ -2,6 +2,17 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.20] – Preview – 2026-11-11
+
+### Fixed
+- Several DWG files opened at once, for example from Explorer or while external references load, are read one after another. Each one gets a fresh reader, so the second file no longer fails with a memory error.
+- Save as DXF or DWG counts the Tianzheng objects and embedded tables that the saved file cannot hold, and the message names them. Before, the count left them out and said nothing was dropped.
+- On AutoCAD 2007 drawings, Tianzheng elevations, axis labels, opening tags, index symbols, tables and dimensions that are not read are listed as not shown. They no longer disappear without a note.
+- Polylines with start and end widths, such as PLINE arrows and multileader arrowheads, are filled to their width instead of drawn as a thin line.
+- The one-step smaller display height stays proportional below 2: 1 draws as 0.75, not 0.5. 3.5, 3 and 2 still draw as 3, 2.5 and 1.5.
+- An attribute's vertical alignment is read from its own field. The field length is no longer taken as the alignment.
+- The app page can no longer change the converter path or the font folders through settings, and it reads only the notes file next to a drawing or a file chosen in the import dialog.
+
 ## [0.2.19] – Preview – 2026-11-11
 
 ### Fixed

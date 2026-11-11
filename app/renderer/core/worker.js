@@ -1,6 +1,8 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
 import { extractTch, tchBuild, tchMarkup, orientTch, tchUnsupported } from './tarch.js';
+import { serial } from './serial.js';
+import { injectedPoints, lostCount } from './lost.js';
 
 let wasm = null;
 let booting = null;
@@ -24,6 +26,7 @@ function retireWasm() {
   bootWasm().catch(() => {});
 }
 const docs = new Map();
+const dwgQueue = serial();
 
 const wasmTrap = e => /memory access out of bounds|^Aborted\(/.test(String(e && e.message || e));
 function dwgToDxf(m, bytes) {
@@ -109,7 +112,7 @@ function injectOles(doc, oles) {
     const old = have.get(key(o.p1[0], o.p1[1]));
     if (old) { if (!old.has(310)) old._ole = o.data; continue; }
     const pairs = [[8, doc.layerHandles.get(o.layer) || '0'], [10, o.p1[0]], [20, o.p1[1]], [11, o.p2[0]], [21, o.p2[1]]];
-    place('OLE2FRAME', pairs, o.mode, o.owner, { _ole: o.data });
+    place('OLE2FRAME', pairs, o.mode, o.owner, { _ole: o.data, _lost: o });
   }
 }
 // 天正对象：读出的文字和它们自带的线框转成普通 TEXT / MTEXT / LINE / CIRCLE。
@@ -130,7 +133,7 @@ function injectTch(doc, tch) {
     for (const { type, pairs } of recs) {
       pairs.unshift([8, lay], [62, it.color]);
       if (st && (type === 'TEXT' || type === 'MTEXT')) pairs.push([7, st]);
-      place(type, pairs, it.mode, it.owner, { _tch: it.f.kind, _tchBundled: it.f.rotFrom === 'stream' || !!it.f.landingText });
+      place(type, pairs, it.mode, it.owner, { _tch: it.f.kind, _tchBundled: it.f.rotFrom === 'stream' || !!it.f.landingText, _lost: it });
     }
     n++;
   }
@@ -164,8 +167,8 @@ async function open(id, name, bytes) {
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
-    const m = await lib();
-    const r = dwgToDxf(m, bytes);
+    // 一张一张读。每张读完都会丢掉读图模块，排在后面的图要等新的模块，不能用前一张用过的。
+    const r = await dwgQueue(async () => dwgToDxf(await lib(), bytes));
     dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
@@ -181,7 +184,7 @@ async function open(id, name, bytes) {
   const scene = buildScene(doc, { codepageDeclared });
   for (const [k, v] of Object.entries(tchSkipped(tch))) scene.stats.skipped[k] = v;
   const t2 = performance.now();
-  docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch });
+  docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch, injected: injectedPoints(doc) });
   scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts };
   return scene;
 }
@@ -371,7 +374,7 @@ self.onmessage = async (e) => {
       const D = docs.get(e.data.doc); if (!D) throw new Error('图纸已关闭');
       let txt = applyEdits(textOf(D), e.data.edits || {});
       if (e.data.bbox) txt = filterRegion(txt, e.data.bbox);
-      const dropped = (txt.match(/\r\n\s*0\r\nACAD_PROXY_ENTITY\r\n/g) || []).length + (D.warn & 64 ? 1 : 0) * 0;
+      const dropped = (txt.match(/\r\n\s*0\r\nACAD_PROXY_ENTITY\r\n/g) || []).length + lostCount(D.injected, e.data.bbox);
       const out = D.enc && D.enc !== 'utf-8' ? encodeLegacy(txt, D.enc).slice() : new TextEncoder().encode(txt);
       post({ id, ok: true, bytes: out.buffer, dropped }, [out.buffer]);
     }

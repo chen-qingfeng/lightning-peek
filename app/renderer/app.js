@@ -1797,7 +1797,7 @@ async function saveDxf(d, bb) {
     const m = await rpc({ cmd: 'dxf', doc: d.id, edits: d.textEdits, bbox: bb ? [bb[0] + spOrigin()[0], bb[1] + spOrigin()[1], bb[2] + spOrigin()[0], bb[3] + spOrigin()[1]] : null });
     busy();
     await saveBytes(baseName(d) + (bb ? tr('_分割') : tr('_另存')) + '.dxf', new Uint8Array(m.bytes));
-    if (m.dropped) toast(tr('已导出。{0} 个天正/专业软件自定义对象无法转换，已略去', m.dropped), 6000);
+    if (m.dropped) toast(tr('已导出。{0} 个天正/专业软件对象或嵌入表格无法写入文件，已略去', m.dropped), 6000);
   } catch (e) { busy(); toast(tr('导出失败：') + e.message); }
 }
 
@@ -1814,7 +1814,7 @@ async function saveDwg(d) {
       const m = await rpc({ cmd: 'dxf', doc: d.id, edits: d.textEdits, bbox: null });
       res = await B.saveDwg(baseName(d) + tr('_另存') + '.dwg', new Uint8Array(m.bytes), r.ver);
       busy();
-      if (res && res.ok) { toast(tr('已另存为 DWG：{0}', res.path) + (m.dropped ? tr('（{0} 个天正/专业软件自定义对象无法转换，已略去）', m.dropped) : ''), 7000); return; }
+      if (res && res.ok) { toast(tr('已另存为 DWG：{0}', res.path) + (m.dropped ? tr('（{0} 个天正/专业软件对象或嵌入表格无法写入文件，已略去）', m.dropped) : ''), 7000); return; }
     } catch (e) { busy(); toast(tr('导出失败：') + (e.message || e)); return; }
     if (!res || res.canceled) return;
     if (res.error) { toast(tr('转换失败：') + res.error, 8000); return; }
