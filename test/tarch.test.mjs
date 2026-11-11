@@ -1,7 +1,7 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText } from '../app/renderer/core/tarch.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch } from '../app/renderer/core/tarch.js';
 import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene } from '../app/renderer/core/engine.js';
 
 class W {
@@ -176,8 +176,14 @@ test('two Tianzheng notes on one stored point use the attachment digit, and a se
   assert.equal(above.align, 10);
   assert.equal(below.align, 1);
   assert.equal(apart.align, 10);
+  assert.equal(above.x, 567762.72);
   assert.equal(above.y, 4786619.42);
+  assert.equal(below.x, 567761.72);
   assert.equal(below.y, 4786619.31);
+  const along = Math.atan2(-1, 0.11);
+  assert.ok(Math.abs(above.rot - along) < 1e-9, above.rot);
+  assert.ok(Math.abs(below.rot - along) < 1e-9, below.rot);
+  assert.ok(!apart.rot);
   assert.equal(above.h, 5.401);
   const low = tchBuild(below, () => { throw new Error('already decoded'); })[0];
   const g = Object.fromEntries(low.pairs);
@@ -186,4 +192,33 @@ test('two Tianzheng notes on one stored point use the attachment digit, and a se
   assert.equal(g[40], 5.309);
   assert.equal(g[72], 0);
   assert.equal(g[73], 3);
+});
+
+test('a baseline-right Tianzheng note stays on its stored point and runs back along the text', () => {
+  assert.equal(tchAlign(9), 12);
+  assert.equal(tchAlign(8), 11);
+  const right = { kind: 'TCH_TEXT', scale: 1, x: 567788.93, y: 4786647.77, h: 5.009, align: 10, anchor: 9, rot: 0, text: '停车场' };
+  placeSharedText([right]);
+  assert.equal(right.align, 12);
+  assert.equal(right.x, 567788.93);
+  assert.equal(right.y, 4786647.77);
+  const g = Object.fromEntries(tchBuild(right, () => { throw new Error('already decoded'); })[0].pairs);
+  assert.equal(g[10], 567788.93);
+  assert.equal(g[20], 4786647.77);
+  assert.equal(g[72], 2);
+  assert.equal(g[73], 0);
+});
+
+test('a layout viewport UCS rotates flat Tianzheng text without moving the insertion point', () => {
+  const f = { kind: 'TCH_TEXT', x: 567716.85, y: 4786708.26, rot: 0, anchor: 7, align: 10 };
+  const kept = { kind: 'TCH_TEXT', x: 1, y: 2, rot: 0.4, anchor: 7, align: 10 };
+  const doc = {
+    entities: [{ type: 'VIEWPORT', f: (c, d = 0) => ({ 111: 0.10001, 121: -0.99499 }[c] ?? d) }],
+    blocks: new Map(),
+  };
+  orientTch(doc, { items: [{ cls: 'TCH_TEXT', f }, { cls: 'TCH_TEXT', f: kept }, { cls: 'TCH_SYMB_SECTION', f: { kind: 'TCH_MTEXT', x: 3, y: 4, rot: 0 } }] });
+  assert.ok(Math.abs(f.rot - Math.atan2(-0.99499, 0.10001)) < 1e-12);
+  assert.equal(f.x, 567716.85);
+  assert.equal(f.y, 4786708.26);
+  assert.equal(kept.rot, 0.4);
 });

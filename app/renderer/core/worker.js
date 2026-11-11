@@ -1,6 +1,6 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
-import { extractTch, tchBuild, tchMarkup, TCH_CLASSES } from './tarch.js';
+import { extractTch, tchBuild, tchMarkup, TCH_CLASSES, orientTch } from './tarch.js';
 import { convertInChild, jsMem, wasmBytesOf } from './dwg-host.js';
 
 let wasm = null;
@@ -129,6 +129,7 @@ function injectOles(doc, oles) {
 // 墙、柱、楼梯等只有图形的天正对象仍然无法显示，记入"暂不显示"
 function injectTch(doc, tch) {
   if (!tch) return 0;
+  orientTch(doc, tch);
   const place = placer(doc);
   let td = null; try { td = new TextDecoder(ansiOf(doc)); } catch (e) { td = new TextDecoder('gbk'); }
   const dec = u => tchMarkup(td.decode(u));
