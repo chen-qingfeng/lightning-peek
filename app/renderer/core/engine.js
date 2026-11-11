@@ -529,14 +529,21 @@ export function buildScene(doc, opts = {}) {
     const bn = lo.blockHandles.map(brName).find(b => /^\*PAPER_SPACE/i.test(b));
     if (bn) mkSpace(bn.toUpperCase(), lo.name, lo.order, true);
   }
-  for (const r of doc.entities) {
+  for (let i = 0; i < doc.entities.length; i++) {
+    const r = doc.entities[i];
     let owner = brName(r.s(330)).toUpperCase();
     if (!owner) owner = r.i(67) === 1 ? '*PAPER_SPACE' : '*MODEL_SPACE';
     if (!spaces.has(owner)) {
       if (/^\*PAPER_SPACE/.test(owner)) mkSpace(owner, owner === '*PAPER_SPACE' ? '布局1' : owner.replace('*PAPER_SPACE', '布局'), 99, true);
       else owner = '*MODEL_SPACE';
     }
-    spaces.get(owner).ents.push(r);
+    const ents = spaces.get(owner).ents;
+    ents.push(r);
+    // VERTEX/SEQEND 的 owner 是 POLYLINE，而不是空间；必须随主体一起分配。
+    if (r.type === 'POLYLINE') {
+      while (doc.entities[i + 1]?.type === 'VERTEX') ents.push(doc.entities[++i]);
+      if (doc.entities[i + 1]?.type === 'SEQEND') ents.push(doc.entities[++i]);
+    }
   }
   // BLOCKS 段里的其他图纸空间
   for (const [k, b] of doc.blocks) {

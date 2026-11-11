@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.19] – Preview – 2026-11-11
+
+### Fixed
+- Old 2D polylines in paper space keep their vertices and SEQEND with the polyline. Those child records no longer fall into model space and disappear from the layout.
+
 ## [0.2.18] – Preview – 2026-11-11
 
 ### Fixed
