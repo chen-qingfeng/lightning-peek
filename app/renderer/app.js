@@ -236,7 +236,7 @@ async function openPath(p) {
 }
 async function openBytes(name, bytes, path, opt = {}) {
   if (!/\.(dwg|dxf)$/i.test(name)) { toast(tr('只支持 DWG / DXF 图纸')); return; }
-  busy(tr('正在打开 ') + name + '…');
+  busy(tr('闪电打开 ') + name + '…');
   const t0 = performance.now();
   try {
     const id = rpcId++;
@@ -255,7 +255,7 @@ async function openBytes(name, bytes, path, opt = {}) {
     busy();
     const sk = Object.entries(sc.stats.skipped).filter(([k]) => !/^(ATTDEF|SEQEND)$/.test(k));
     if (!opt.hidden && sc.stats.entities === 0) { toast(tr('这张图纸里没有可显示的图元'), 5000); return doc; }
-    if (!opt.hidden) toast(tr('已打开 {0}　{1}　{2} 个图元　用时 {3} 秒', name, sc.info.version, sc.stats.entities.toLocaleString(), (doc.openMs / 1000).toFixed(2)) + (sk.length ? tr('　（{0} 暂不显示）', sk.map(([k, v]) => k + '×' + v).join('，')) : '') + (doc.unit.uf !== 1 ? tr('　测量单位：1 图纸单位 = {0} mm（{1}，可点状态栏的比例修改）', +doc.unit.uf.toFixed(4), tr(UNIT_WHY[doc.unit.why] || '')) : '') + fontNote, 7000);
+    if (!opt.hidden) toast(tr('闪电打开 {0}　{1}　{2} 个图元　用时 {3} 秒', name, sc.info.version, sc.stats.entities.toLocaleString(), (doc.openMs / 1000).toFixed(2)) + (sk.length ? tr('　（{0} 暂不显示）', sk.map(([k, v]) => k + '×' + v).join('，')) : '') + (doc.unit.uf !== 1 ? tr('　测量单位：1 图纸单位 = {0} mm（{1}，可点状态栏的比例修改）', +doc.unit.uf.toFixed(4), tr(UNIT_WHY[doc.unit.why] || '')) : '') + fontNote, 7000);
     return doc;
   } catch (err) { busy(); toast(tr('打开失败：') + err.message, 6000); console.error(err); }
 }
@@ -2485,7 +2485,7 @@ function localizeStatic() {
   document.documentElement.lang = LANG === 'zh' ? 'zh-CN' : 'en';
   document.title = tr('闪电看图');
   $('#empty h1').textContent = tr('闪电看图');
-  $('#empty .logo p').textContent = tr('快速查看 CAD 图纸（DWG / DXF）');
+  $('#empty .logo p').textContent = tr('打开图纸，快速如闪电');
   $('#empty-open').textContent = tr('打开图纸');
   $('#empty .hint').textContent = window.matchMedia('(max-width: 800px)').matches ? tr('从手机文件里选择 DWG 或 DXF。单指移动，双指缩放。') : tr('也可以把图纸文件直接拖进窗口');
   $('#busy-text').textContent = tr('正在打开…');

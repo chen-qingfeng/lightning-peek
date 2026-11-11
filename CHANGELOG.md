@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.12] – Preview – 2026-11-11
+
+### Changed
+- The DWG reader is prepared when the app starts, and the next one starts loading as soon as a drawing has opened. Opening a drawing no longer waits to compile the reader on every file. Drawing display is unchanged.
+
 ## [0.2.11] – Preview – 2026-11-11
 
 ### Fixed
