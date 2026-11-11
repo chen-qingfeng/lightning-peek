@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.10] – Preview – 2026-11-11
+
+### Fixed
+- Tianzheng section notes on AutoCAD 2007 drawings sit at the end of the leader, not on the arrow tip. The leader line is drawn. Arrow notes keep their polyline.
+
 ## [0.2.9] – Preview – 2026-11-10
 
 ### Fixed

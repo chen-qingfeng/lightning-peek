@@ -178,6 +178,34 @@ function heightAt(strs, index, lo, hi, fallback) {
   const v = tgNumber(strs[index]);
   return v >= lo && v <= hi ? v : fallback;
 }
+// 做法标注在字符串流前面依次写 (Y, X)。第一点是箭头，落在做法上；最后一点才是文字。
+function yxChain(bytes, nbits, origin, end) {
+  const pts = [];
+  for (let p = origin; p + 128 <= end; p += 128) {
+    const y = rdAt(bytes, nbits, p), x = rdAt(bytes, nbits, p + 64);
+    if (!onSheet(x) || !onSheet(y)) break;
+    pts.push([x, y]);
+  }
+  return pts;
+}
+// 引出箭头在字符串流前面依次写 (X, Y)，每点之间隔着 2 位的位双精度标记。
+function xyChain(bytes, nbits, origin, end) {
+  const pts = [];
+  for (let p = origin; p + 128 <= end; p += 130) {
+    const x = rdAt(bytes, nbits, p), y = rdAt(bytes, nbits, p + 64);
+    if (!onSheet(x) || !onSheet(y)) break;
+    pts.push([x, y]);
+  }
+  return pts;
+}
+// 文字放在引线末端的外侧：引线从下上来就底边对齐，从左过来就左边对齐。
+function leaderAttach(pts) {
+  if (!pts || pts.length < 2) return 7;
+  const a = pts[pts.length - 2], b = pts[pts.length - 1];
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  if (Math.abs(dy) >= Math.abs(dx)) return dy >= 0 ? 8 : 2;
+  return dx >= 0 ? 4 : 6;
+}
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
   let span, strs;
@@ -197,10 +225,22 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     else if (kind === 'TCH_DRAWINGNAME') { y = rdAt(bytes, nbits, 44); x = rdAt(bytes, nbits, 112); }
     else return null;
   } catch (e) { return null; }
-  if (!onSheet(x) || !onSheet(y)) return null;
   const body = texts.join('\n');
   const multi = /[\r\n]/.test(body) || texts.length > 1;
   const h = heightAt(strs, 2, 0.8, 20, multi ? 2.5 : 2);
+  if (kind === 'TCH_COMPOSING') {
+    const pts = yxChain(bytes, nbits, 134, span.start);
+    if (!pts.length) return null;
+    const end = pts[pts.length - 1];
+    return { kind, scale: 1, pts, x: end[0], y: end[1], z: 0, rot: 0, h, text: body };
+  }
+  if (kind === 'TCH_ARROW') {
+    const pts = xyChain(bytes, nbits, 86, span.start);
+    if (!pts.length) return null;
+    const end = pts[pts.length - 1];
+    return { kind, scale: 1, pts, x: end[0], y: end[1], z: 0, rot: 0, h, text: body };
+  }
+  if (!onSheet(x) || !onSheet(y)) return null;
   if (kind === 'TCH_DRAWINGNAME') {
     const tall = strs.map(tgNumber).filter(v => v >= 4 && v <= 15);
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
@@ -471,10 +511,17 @@ export function tchBuild(f, dec) {
       if (s3) out.push(TXT(mx, f.q[1] - sc, H, 0, 1, 3, s3));
       return out;
     }
+    case 'TCH_COMPOSING': {
+      const s = (f.text != null ? tchMarkup(f.text) : dec(f.raw || new Uint8Array())).trim();
+      const pts = f.pts || [];
+      for (let i = 0; i + 1 < pts.length; i++) out.push(LN(pts[i], pts[i + 1]));
+      if (s) out.push(MT(f.x, f.y, f.h * sc, leaderAttach(pts), 0, s, 0));
+      return out;
+    }
     case 'TCH_ARROW': {
-      const s = dec(f.raw).trim();
+      const s = (f.text != null ? tchMarkup(f.text) : dec(f.raw || new Uint8Array())).trim();
       let rot = 0;
-      if (f.pts.length >= 2) { rot = readable(Math.atan2(f.pts[1][1] - f.pts[0][1], f.pts[1][0] - f.pts[0][0])); for (let i = 0; i + 1 < f.pts.length; i++) out.push(LN(f.pts[i], f.pts[i + 1])); }
+      if (f.pts && f.pts.length >= 2) { rot = readable(Math.atan2(f.pts[1][1] - f.pts[0][1], f.pts[1][0] - f.pts[0][0])); for (let i = 0; i + 1 < f.pts.length; i++) out.push(LN(f.pts[i], f.pts[i + 1])); }
       if (s) out.push(TXT(f.x, f.y, f.h * sc, rot, 1, 1, s));
       return out;
     }
