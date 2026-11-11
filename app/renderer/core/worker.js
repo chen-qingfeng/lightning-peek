@@ -1,5 +1,5 @@
 // 闪电看图 · 后台解析线程
-import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
+import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf, injectVertexBulges } from './engine.js';
 import { extractTch, tchBuild, tchMarkup, orientTch, tchUnsupported } from './tarch.js';
 
 let wasm = null;
@@ -39,15 +39,17 @@ function dwgToDxf(m, bytes) {
     const rc = m.dwg_write_dxf(inF, outF);
     if (rc >= 128 || !m.FS.analyzePath(outF).exists) throw new Error(errText(rc || err));
     const out = new Uint8Array(m.FS.readFile(outF));
-    let oles = [], tch = null;
+    let oles = [], tch = null, vertexBulges = null;
     if (dwg && err < 128) {
       try { oles = extractOles(m, dwg); } catch (e) { console.warn('OLE', e); if (wasmTrap(e)) wasm = null; }
+      // LibreDWG 写 DXF 时常丢掉 VERTEX 组码 42；在 wasm 堆坏掉之前先按句柄取出凸度。
+      if (wasm) { try { vertexBulges = extractVertexBulges(m, dwg); } catch (e) { console.warn('VERTEX bulge', e); if (wasmTrap(e)) wasm = null; } }
       // 2000/2004 按字段顺序读。2007 的文字在字符串流里，不能沿用旧顺序。
       const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
       const mode = ver === 'AC1015' || ver === 'AC1018' ? 1 : ver === 'AC1021' ? 2 : 0;
       if (wasm) { try { tch = extractTch(m, dwg, hex, mode); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
     }
-    return { bytes: out, warn: err, oles, tch };
+    return { bytes: out, warn: err, oles, tch, vertexBulges };
   } finally {
     // 写某些图（例如这张 AC1015 天正图）的 DXF 时，LibreDWG 会把 wasm 堆写坏，
     // 下一张图再读就变成 memory access out of bounds。DXF 已经复制出来，丢掉整个模块。
@@ -59,6 +61,29 @@ function dwgToDxf(m, bytes) {
 }
 // LibreDWG 写 DXF 时会丢掉 OLE2FRAME，这里直接从 DWG 对象里取出数据和位置
 const hex = v => (typeof v === 'bigint' ? v : BigInt(Math.round(Number(v) || 0))).toString(16).toUpperCase();
+// 旧式二维多段线的 VERTEX 凸度：DXF 里常缺组码 42，按句柄从 DWG 对象补回
+function extractVertexBulges(m, dwg) {
+  const out = new Map();
+  const n = m.dwg_get_num_objects(dwg);
+  for (let i = 0; i < n; i++) {
+    try {
+      const obj = m.dwg_get_object(dwg, i);
+      if (!obj) continue;
+      let name = '';
+      try { name = String(m.dwg_object_get_dxfname(obj) || '').replace(/\0+$/, ''); } catch (e) { continue; }
+      if (name !== 'VERTEX_2D') continue;
+      const et = m.dwg_object_to_entity_tio(obj);
+      const ent = m.dwg_object_to_entity(obj);
+      if (!et || !ent) continue;
+      const bulge = Number(m.dwg_dynapi_entity_value(et, 'bulge')?.data || 0);
+      if (!(Math.abs(bulge) > 1e-12)) continue;
+      const h = m.dwg_object_entity_get_handle_object(ent);
+      const handle = h && h.value != null ? hex(h.value) : '';
+      if (handle) out.set(handle, bulge);
+    } catch (e) { if (wasmTrap(e)) throw e; }
+  }
+  return out;
+}
 function extractOles(m, dwg) {
   const out = [];
   const n = m.dwg_get_num_objects(dwg);
@@ -160,13 +185,13 @@ function collect(scene, list = []) {
 async function open(id, name, bytes) {
   const t0 = performance.now();
   const lower = name.toLowerCase();
-  let dxfBytes = bytes, warn = 0, version = '', oles = null, tch = null;
+  let dxfBytes = bytes, warn = 0, version = '', oles = null, tch = null, vertexBulges = null;
   const magic = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
   if (lower.endsWith('.dwg') || /^AC10\d\d/.test(magic)) {
     post({ id, progress: '正在转换 DWG…' });
     const m = await lib();
     const r = dwgToDxf(m, bytes);
-    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch;
+    dxfBytes = r.bytes; warn = r.warn; version = magic; oles = r.oles; tch = r.tch; vertexBulges = r.vertexBulges;
   } else {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
   }
@@ -175,13 +200,14 @@ async function open(id, name, bytes) {
   const text = decoded.text, enc = decoded.enc, codepageDeclared = !!decoded.codepageDeclared;
   const doc = parseDxf(text);
   injectOles(doc, oles);
+  injectVertexBulges(doc, vertexBulges);
   const tchTexts = injectTch(doc, tch);
   if (!version) { const v = doc.header.$ACADVER; version = v && v[0] ? v[0][1] : 'DXF'; }
   const t1 = performance.now();
   const scene = buildScene(doc, { codepageDeclared });
   for (const [k, v] of Object.entries(tchSkipped(tch))) scene.stats.skipped[k] = v;
   const t2 = performance.now();
-  docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch });
+  docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch, vertexBulges });
   scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts };
   return scene;
 }
@@ -189,7 +215,7 @@ function textOf(D) { return decodeDxf(D.bytes).text; }
 function docOf(id) {
   const D = docs.get(id);
   if (!D) return null;
-  if (!D.doc) { D.doc = parseDxf(textOf(D)); injectOles(D.doc, D.oles); injectTch(D.doc, D.tch); }
+  if (!D.doc) { D.doc = parseDxf(textOf(D)); injectOles(D.doc, D.oles); injectVertexBulges(D.doc, D.vertexBulges); injectTch(D.doc, D.tch); }
   return D.doc;
 }
 function verName(v) {
