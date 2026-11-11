@@ -1833,7 +1833,10 @@ function updateScaleInfo() {
   const d = state.cur;
   $('#st-scale').textContent = d && d.kind === 'drawing' ? tr('比例：1 图纸单位 = {0} mm', +d.unit.uf.toFixed(6)) + (d.unit.why ? paren(tr(UNIT_WHY[d.unit.why] || '')) : '') : '';
   $('#st-scale').title = tr('点击修改比例与单位'); $('#st-scale').style.cursor = 'pointer'; $('#st-scale').onclick = () => state.cur && state.cur.kind === 'drawing' && scaleDialog();
-  $('#st-info').textContent = d && d.kind === 'drawing' ? tr('{0} · {1} 图元', d.scene.info.version, d.scene.stats.entities.toLocaleString()) : '';
+  const info = $('#st-info');
+  const broken = d && d.kind === 'drawing' && d.scene.stats && d.scene.stats.brokenText;
+  info.textContent = d && d.kind === 'drawing' ? tr('{0} · {1} 图元', d.scene.info.version, d.scene.stats.entities.toLocaleString()) + (broken ? tr(' · 文字可能损坏') : '') : '';
+  info.title = broken ? tr('部分文字像是编码损坏（连续的 ◇ 或替换符）。可换一份 DXF，或在原 CAD 里另存后再打开。') : '';
 }
 async function markSettings() {
   const d = state.cur; if (!d || d.kind !== 'drawing') return;
@@ -2016,6 +2019,9 @@ function locateMeasure(m) {
   state.selMeasure = m.id; refreshSide();
 }
 function findPanel(body, d) {
+  if (d.scene && d.scene.stats && d.scene.stats.brokenText) {
+    body.append(h('div', { cls: 'disclaimer', text: tr('部分文字像是编码损坏（连续的 ◇ 或替换符）。可换一份 DXF，或在原 CAD 里另存后再打开。') }));
+  }
   const input = h('input', { type: 'text', placeholder: tr('输入要查找的文字，回车搜索') });
   const out = h('div', { style: 'margin-top:8px' });
   const run = () => {

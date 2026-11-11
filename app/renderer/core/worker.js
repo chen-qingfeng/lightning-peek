@@ -177,16 +177,17 @@ async function open(id, name, bytes) {
     if (new TextDecoder('latin1').decode(bytes.subarray(0, 22)).startsWith('AutoCAD Binary DXF')) throw new Error('暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF');
   }
   post({ id, progress: '正在解析图元…' });
-  const { text, enc } = decodeDxf(dxfBytes);
+  const decoded = decodeDxf(dxfBytes);
+  const text = decoded.text, enc = decoded.enc, codepageDeclared = !!decoded.codepageDeclared;
   const doc = parseDxf(text);
   injectOles(doc, oles);
   const tchTexts = injectTch(doc, tch);
   if (!version) { const v = doc.header.$ACADVER; version = v && v[0] ? v[0][1] : 'DXF'; }
   const t1 = performance.now();
-  const scene = buildScene(doc);
+  const scene = buildScene(doc, { codepageDeclared });
   for (const [k, v] of Object.entries(tchSkipped(tch))) scene.stats.skipped[k] = v;
   const t2 = performance.now();
-  docs.set(id, { bytes: dxfBytes.slice(), enc, warn, oles, tch });
+  docs.set(id, { bytes: dxfBytes.slice(), enc, codepageDeclared, warn, oles, tch });
   scene.info = { version: verName(version), convertMs: Math.round(t1 - t0), buildMs: Math.round(t2 - t1), warn, tchTexts };
   return scene;
 }
@@ -202,14 +203,16 @@ function verName(v) {
   return m[v] ? 'AutoCAD ' + m[v] : v;
 }
 
-function modelTexts(doc, origin) {
-  const sc = buildScene(doc, origin ? { origin } : {});
+function modelTexts(doc, origin, codepageDeclared) {
+  const opt = { codepageDeclared: !!codepageDeclared };
+  if (origin) opt.origin = origin;
+  const sc = buildScene(doc, opt);
   const sp = sc.spaces[0];
   return { sp, origin: sc.origin };
 }
 // 自动对齐：用两图里各只出现一次的相同文字，求出最常见的整体位移
-function autoAlign(A, B) {
-  const a = modelTexts(A), b = modelTexts(B);
+function autoAlign(A, B, cpA, cpB) {
+  const a = modelTexts(A, null, cpA), b = modelTexts(B, null, cpB);
   const ua = new Map(), ub = new Map();
   const uniq = (sp, o, m) => { const c = new Map(); for (const t of sp.texts) c.set(t.s, (c.get(t.s) || 0) + 1); for (const t of sp.texts) if (c.get(t.s) === 1 && t.s.length >= 2) m.set(t.s, [t.x + o[0], t.y + o[1]]); };
   uniq(a.sp, a.origin, ua); uniq(b.sp, b.origin, ub);
@@ -221,18 +224,20 @@ function autoAlign(A, B) {
   return best;
 }
 function compare(aId, bId, opts = {}) {
+  const DA = docs.get(aId), DB = docs.get(bId);
   const A = docOf(aId), B = docOf(bId);
   if (!A || !B) throw new Error('对比的图纸已关闭');
-  const pre = buildScene(B, { sinkFactory: () => new SigSink(1) });
+  const cpA = !!(DA && DA.codepageDeclared), cpB = !!(DB && DB.codepageDeclared);
+  const pre = buildScene(B, { codepageDeclared: cpB, sinkFactory: () => new SigSink(1) });
   const mb = pre.spaces[0];
   const size = Math.max(mb.bbox[2] - mb.bbox[0], mb.bbox[3] - mb.bbox[1], 1);
   const q = opts.tol > 0 ? opts.tol : size * 2e-6;
   const origin = pre.origin;
   let shift = [0, 0], alignVotes = 0;
-  if (opts.align !== false) { const al = autoAlign(A, B); shift = al.d; alignVotes = al.n; }
+  if (opts.align !== false) { const al = autoAlign(A, B, cpA, cpB); shift = al.d; alignVotes = al.n; }
   const sinkA = new SigSink(q), sinkB = new SigSink(q);
-  buildScene(A, { origin: [origin[0] - shift[0], origin[1] - shift[1]], sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkA : new SigSink(q)) });
-  buildScene(B, { origin, sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkB : new SigSink(q)) });
+  buildScene(A, { codepageDeclared: cpA, origin: [origin[0] - shift[0], origin[1] - shift[1]], sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkA : new SigSink(q)) });
+  buildScene(B, { codepageDeclared: cpB, origin, sinkFactory: sp => (sp.key === '*MODEL_SPACE' ? sinkB : new SigSink(q)) });
   const count = (items) => { const m = new Map(); for (const it of items) m.set(it.sig, (m.get(it.sig) || 0) + 1); return m; };
   const keyA = count(sinkA.items), keyB = count(sinkB.items);
   const same = [], add = [], del = [];

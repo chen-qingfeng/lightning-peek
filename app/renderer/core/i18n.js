@@ -348,6 +348,8 @@ export const EN = {
  "图块名称": "Block name",
  "_图块清单.xlsx": "_blocks.xlsx",
  "输入要查找的文字，回车搜索": "Text to find, press Enter",
+ "部分文字像是编码损坏（连续的 ◇ 或替换符）。可换一份 DXF，或在原 CAD 里另存后再打开。": "Some text looks damaged (runs of ◇ or replacement characters). Try another DXF, or save a new copy from the original CAD program.",
+ " · 文字可能损坏": " · text may be damaged",
  "找到 {0}{1} 处": "{0}{1} found",
  "导出查找结果": "Export results",
  "序号": "No.",
