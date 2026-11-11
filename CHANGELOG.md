@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.14] – Preview – 2026-11-11
+
+### Fixed
+- Tianzheng leader notes keep the insertion point stored on the object. The attachment digit keeps left, center and right, so the text runs out from the correct side of that point. Two notes stacked on a leader take their direction from the line between those points. A note without a partner follows the X axis of a user coordinate system set in a layout viewport.
+
 ## [0.2.13] – Preview – 2026-11-11
 
 ### Fixed
