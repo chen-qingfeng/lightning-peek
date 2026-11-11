@@ -1,6 +1,6 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf } from './engine.js';
-import { extractTch, tchBuild, tchMarkup, TCH_CLASSES, orientTch } from './tarch.js';
+import { extractTch, tchBuild, tchMarkup, orientTch, tchUnsupported } from './tarch.js';
 
 let wasm = null;
 let booting = null;
@@ -136,14 +136,7 @@ function injectTch(doc, tch) {
   }
   return n;
 }
-function tchSkipped(tch) {
-  const out = {};
-  if (!tch) return out;
-  const drawn = new Set((tch.items || []).map(it => it.cls).filter(Boolean));
-  for (const [k, v] of Object.entries(tch.counts)) if (/^TCH_/.test(k) && !drawn.has(k) && (!tch.decoded || !TCH_CLASSES.has(k))) out[k] = v;
-  if (tch.decoded) for (const [k, v] of Object.entries(tch.failed || {})) if (!drawn.has(k)) out[k + '?'] = v;
-  return out;
-}
+function tchSkipped(tch) { return tchUnsupported(tch); }
 function errText(code) {
   if (code & 2048) return '图纸版本过新或不受支持。可以在 CAD 软件里另存为 2007 或更早版本后再打开';
   if (code & 1024) return '图纸文件损坏或不完整。可以用 CAD 软件的「修复」功能处理后再打开';

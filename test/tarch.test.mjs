@@ -1,7 +1,7 @@
 // 天正文字解码：用手工拼出来的位流测试（不依赖真实图纸）
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch, textAnchor } from '../app/renderer/core/tarch.js';
+import { decodeTch, tchPairs, tchMarkup, tgNumber, decodeTchStream, tchBuild, placeSharedText, tchAlign, orientTch, textAnchor, tchUnsupported } from '../app/renderer/core/tarch.js';
 import { rejoinSplitChars, rejoinUtf8, decodeDxf, parseDxf, buildScene, makeRec } from '../app/renderer/core/engine.js';
 
 class W {
@@ -349,9 +349,9 @@ test('2007 green arrow notes straddle the landing, away from the arrow tip', () 
   assert.deepEqual(texts.map(g => g[73]), [0, 3]);
 });
 
-function leaderStream(count, length = -20) {
+function leaderStream(count, length = -20, arrow = [110, 90]) {
   const w = new W(); w.put(0, 82); w.RD(100); w.RD(100);
-  for (let i = 0; i < count; i++) { w.RD(90); w.RD(110 + i * 10); }
+  for (let i = 0; i < count; i++) { w.RD(arrow[1]); w.RD(arrow[0] + i * 10); }
   w.put(0, 396);
   const start = w.bits.length, strs = Array(25).fill('');
   strs[2] = encodeNumber(0.5); strs[3] = encodeNumber(Math.PI / 2);
@@ -378,6 +378,18 @@ test('2007 multileaders without embedded text restore baseline, branches and arr
 test('2007 multileaders reject missing endpoints and invalid lengths', () => {
   assert.equal(leaderStream(0), null);
   assert.equal(leaderStream(1, Infinity), null);
+  assert.equal(leaderStream(1, -20, [10000, 10000]), null);
+});
+
+test('a failed leader is still reported when another one of the same class was drawn', () => {
+  const note = tchUnsupported({
+    decoded: true,
+    counts: { TCH_MULTILEADER: 2, TCH_WALL: 4 },
+    items: [{ cls: 'TCH_MULTILEADER' }],
+    failed: { TCH_MULTILEADER: 1 },
+  });
+  assert.equal(note['TCH_MULTILEADER未支持'], 1);
+  assert.equal(note.TCH_WALL, 4);
 });
 
 test('bundled font replacement preserves the drawing anchor and text geometry', () => {
