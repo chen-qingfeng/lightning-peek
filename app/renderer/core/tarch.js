@@ -234,36 +234,96 @@ function composingFields(strs) {
   const side = [...ints].reverse().find(d => ti < 0 || d.i < ti)?.v;
   return { height, ratio, base, side: side == null ? 1 : side };
 }
-// 文字后面的三位数字，中间一位是附着点。1、2、3 表示插入点在字形上沿，7、8、9 表示插入点在基线。
-// 前后两位随对象变化，不能当成坐标。
+// 文字后面的三位数字，中间一位是附着点，和多行文字一样：
+// 1 2 3 上沿的左/中/右，4 5 6 正中的左/中/右，7 8 9 基线的左/中/右。
+// 左右那一位决定文字从插入点向哪一侧排开。前后两位随对象变化，不能当成坐标。
 function textAnchor(strs) {
   const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
-  let top = false, bot = false;
+  let digit = 0;
   strs.forEach((s, i) => {
     if (ti >= 0 && i <= ti) return;
     const d = saltedDigit(tgAscii(s));
-    if (d >= 1 && d <= 3) top = true;
-    else if (d >= 7 && d <= 9) bot = true;
+    if (d >= 1 && d <= 9) digit = d;
   });
-  if (top === bot) return 0;
-  return top ? 1 : 7;
+  return digit;
 }
-// 两条文字的插入点几乎重合时，按各自的附着点分别画在这个点的上方和下方。
-// 插入点本身不挪，字高不放大。已经分开的文字保持基线落在自己的点上。
+// 7/8/9 用 10/11/12：那三个值在单行文字里是基线的左/中/右，不是正中。
+export function tchAlign(anchor) {
+  if (anchor >= 1 && anchor <= 6) return anchor;
+  if (anchor === 7) return 10;
+  if (anchor === 8) return 11;
+  if (anchor === 9) return 12;
+  return 10;
+}
+// 上下两条引出文字的插入点只差大约 1 个图形单位，连线垂直于文字方向。
+// 插入点本身不挪。文字沿这条连线的垂线排开，右附着点的字停在插入点上。
 export function placeSharedText(items) {
   const texts = [];
   for (const f of items) {
-    if (!f || (f.kind !== 'TCH_TEXT' && f.kind !== 'TCH_MTEXT')) continue;
-    if (f.anchor !== 1 && f.anchor !== 7) continue;
+    if (!f || f.kind !== 'TCH_TEXT') continue;
+    if (!(f.anchor >= 1 && f.anchor <= 9)) continue;
     if (!Number.isFinite(f.x) || !Number.isFinite(f.y)) continue;
     texts.push(f);
   }
+  for (const f of texts) f.align = tchAlign(f.anchor);
   for (const f of texts) {
-    // 叠在一起的两条，插入点只差大约 1 个图形单位。真正换行的两条至少隔着一个字高。
-    const share = texts.some(g => g !== f && (f.anchor === 1) !== (g.anchor === 1) && Math.hypot(f.x - g.x, f.y - g.y) < 2);
-    if (!share) continue;
-    f.align = f.anchor === 1 ? 1 : 10;
+    if (f.rot) continue;
+    const top = f.anchor <= 3;
+    const partner = texts.find(g => g !== f && (g.anchor <= 3) !== top && Math.hypot(f.x - g.x, f.y - g.y) < 3);
+    if (!partner) continue;
+    const base = top ? partner : f;
+    const other = top ? f : partner;
+    const vx = other.x - base.x, vy = other.y - base.y;
+    if (Math.hypot(vx, vy) < 1e-6) continue;
+    const upx = -vx, upy = -vy;
+    f.rot = Math.atan2(-upx, upy);
   }
+}
+// 布局视口里重设过用户坐标系时，没有上下配对的文字仍是按该坐标系的 X 轴书写的。
+// 只补旋转角，不改插入点。
+export function viewportUcsAngle(doc) {
+  if (!doc) return 0;
+  const angs = [];
+  const scan = ents => {
+    if (!ents) return;
+    for (const r of ents) {
+      if (!r || r.type !== 'VIEWPORT' || typeof r.f !== 'function') continue;
+      const xx = r.f(111, 1), xy = r.f(121, 0);
+      if (!Number.isFinite(xx) || !Number.isFinite(xy) || Math.hypot(xx, xy) < 1e-9) continue;
+      const ang = Math.atan2(xy, xx);
+      if (Math.abs(ang) < 1e-4) continue;
+      angs.push(ang);
+    }
+  };
+  scan(doc.entities);
+  if (doc.blocks) for (const b of doc.blocks.values()) scan(b.ents);
+  return angs.length ? angs[0] : 0;
+}
+export function orientTch(doc, tch) {
+  const ang = viewportUcsAngle(doc);
+  if (!ang || !tch || !tch.items) return;
+  for (const it of tch.items) {
+    const f = it.f;
+    if (!f || f.rot) continue;
+    if (it.cls !== 'TCH_TEXT' && it.cls !== 'TCH_MTEXT') continue;
+    if (f.kind !== 'TCH_TEXT' && f.kind !== 'TCH_MTEXT') continue;
+    f.rot = ang;
+  }
+}
+// 2007 引出文字里那个约 5 的数不是画出来的字高：同一档文字各自的这个数不同，
+// 炸开后的汉字字高却完全一样。文字后面第一个小数用来分档。小于 1 的是 3 毫米档，
+// 其余是 3.5 毫米档。两档再乘以本图的出图系数 68/141，得到图形单位里的字高。
+// 3 × 68/141 = 68/47，3.5 × 68/141 = 238/141。
+const TCH_DRAW_SCALE = 68 / 141;
+export function tchDrawnHeight(strs) {
+  const ti = strs.findIndex(s => tgHuman(s) && /[⺀-鿿]/.test(s));
+  for (let i = Math.max(ti, 0) + 1; i < strs.length; i++) {
+    const v = tgNumber(strs[i]);
+    if (!(v > 0 && v < 20)) continue;
+    if (v < 1) return 3 * TCH_DRAW_SCALE;
+    if (v > 4 && Math.abs(v - Math.round(v)) > 1e-6) return 3.5 * TCH_DRAW_SCALE;
+  }
+  return 0;
 }
 // AutoCAD 2007 的天正文字。旧的 2000 字段顺序读这段会得到乱码，所以到不了这里的版本不会调用它。
 export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
@@ -307,7 +367,9 @@ export function decodeTchStream(kind, bytes, nbits, hdlOff = -1) {
     const tall = strs.map(tgNumber).filter(v => v >= 4 && v <= 15);
     return { kind, scale: 1, x, y, z: 0, rot: 0, h: tall[0] || 4, h2: tall[1] || 2.5, text: texts.find(s => /[⺀-鿿]/.test(s)) || texts[0], text2: texts.find(s => /\d+\s*:\s*\d+/.test(s)) || '' };
   }
-  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h, align: multi ? 1 : 10, anchor: textAnchor(strs), width: 0, text: body };
+  const anchor = textAnchor(strs);
+  const drawn = !multi ? tchDrawnHeight(strs) : 0;
+  return { kind: multi ? 'TCH_MTEXT' : 'TCH_TEXT', scale: 1, x, y, z: 0, rot: 0, h: drawn > 0 ? drawn : h, align: multi ? 1 : tchAlign(anchor), anchor, width: 0, text: body };
 }
 
 // ---------- 其它天正对象 ----------
