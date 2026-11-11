@@ -2,6 +2,21 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.12] – Preview – 2026-11-11
+
+### Changed
+- The DWG reader is prepared when the app starts, and the next one starts loading as soon as a drawing has opened. Opening a drawing no longer waits to compile the reader on every file. Drawing display is unchanged.
+
+## [0.2.11] – Preview – 2026-11-11
+
+### Fixed
+- Tianzheng section notes keep the arrow point and the nearest text row from the drawing. Text is drawn on the outer side of the leader, one row at a time, with a short tick on each row. The vertical leader runs from the arrow up through those rows.
+
+## [0.2.10] – Preview – 2026-11-11
+
+### Fixed
+- Tianzheng section notes on AutoCAD 2007 drawings sit at the end of the leader, not on the arrow tip. The leader line is drawn. Arrow notes keep their polyline.
+
 ## [0.2.9] – Preview – 2026-11-10
 
 ### Fixed

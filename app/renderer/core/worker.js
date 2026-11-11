@@ -3,12 +3,25 @@ import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, an
 import { extractTch, tchBuild, tchMarkup, TCH_CLASSES } from './tarch.js';
 
 let wasm = null;
-async function lib() {
-  if (!wasm) {
-    const mod = (await import('../lib/libredwg-web.js')).default;
-    wasm = await mod({ locateFile: (f) => new URL('../lib/' + f, import.meta.url).href });
+let booting = null;
+// 读图模块单独准备。编译放在打开之前，不改后面的解析和画图。
+function bootWasm() {
+  if (wasm) return Promise.resolve(wasm);
+  if (!booting) {
+    booting = (async () => {
+      const mod = (await import('../lib/libredwg-web.js')).default;
+      const m = await mod({ locateFile: (f) => new URL('../lib/' + f, import.meta.url).href });
+      wasm = m;
+      booting = null;
+      return m;
+    })().catch((e) => { booting = null; throw e; });
   }
-  return wasm;
+  return booting;
+}
+function lib() { return bootWasm(); }
+function retireWasm() {
+  wasm = null;
+  bootWasm().catch(() => {});
 }
 const docs = new Map();
 
@@ -39,7 +52,7 @@ function dwgToDxf(m, bytes) {
     // 写某些图（例如这张 AC1015 天正图）的 DXF 时，LibreDWG 会把 wasm 堆写坏，
     // 下一张图再读就变成 memory access out of bounds。DXF 已经复制出来，丢掉整个模块。
     try { if (dwg && m.dwg_free) m.dwg_free(dwg); } catch (e) { /* 模块即将丢弃 */ }
-    wasm = null;
+    retireWasm();
     try { m.FS.unlink(inF); } catch (e) { /* ignore */ }
     try { m.FS.unlink(outF); } catch (e) { /* ignore */ }
   }
@@ -349,6 +362,7 @@ function filterRegion(text, bb) {
   return out.join('\r\n');
 }
 function post(m, t) { self.postMessage(m, t || []); }
+bootWasm().catch(() => {});
 self.onmessage = async (e) => {
   const { id, cmd } = e.data;
   try {

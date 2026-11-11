@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.2.9 preview</b></p>
+<p align="center"><b>Current version: v0.2.12 preview</b></p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 

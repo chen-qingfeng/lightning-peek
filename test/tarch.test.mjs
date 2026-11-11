@@ -146,3 +146,24 @@ test('2007 Tianzheng text is read from the string stream, not the 2000 field ord
   const drawn = tchBuild(f, () => { throw new Error('unicode text is already decoded'); }).find(r => r.type === 'TEXT');
   assert.equal(Object.fromEntries(drawn.pairs)[1], '甲');
 });
+
+test('2007 composing note sits to the right of the leader, on the stored row', () => {
+  const w = new W();
+  w.put(0, 134);
+  w.RD(4787022); w.RD(575143); w.RD(4787156); w.RD(575143);
+  w.put(1, 2); w.RC(1); w.RC(0x32); w.RC(0x75);
+  w.RS(26); w.put(1, 1);
+  const f = decodeTchStream('TCH_COMPOSING', w.bytes(), w.bits.length, w.bits.length);
+  assert.equal(f.text, '甲');
+  assert.ok(Math.abs(f.y - 4787156) < 1e-3, f.y);
+  const recs = tchBuild(f, () => { throw new Error('already decoded'); });
+  const lines = recs.filter(r => r.type === 'LINE').map(r => Object.fromEntries(r.pairs));
+  const vert = lines.find(g => Math.abs(g[10] - g[11]) < 1e-3);
+  const horz = lines.find(g => Math.abs(g[20] - g[21]) < 1e-3);
+  assert.ok(Math.abs(vert[20] - 4787022) < 1e-3 && Math.abs(vert[21] - 4787156) < 1e-3);
+  assert.ok(horz[11] > horz[10]);
+  const note = Object.fromEntries(recs.find(r => r.type === 'TEXT').pairs);
+  assert.equal(note[73], 2);
+  assert.ok(note[10] > 575143);
+  assert.ok(Math.abs(note[20] - 4787156) < 1e-3);
+});
