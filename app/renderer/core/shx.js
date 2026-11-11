@@ -7,6 +7,8 @@ const DIRS = [
 ];
 
 export const fontLib = new Map();
+// 每装一次字体加一。排版缓存用它判断字体有没有换过。
+export let fontGen = 0;
 
 function s8(b) { return b < 128 ? b : b - 256; }
 
@@ -155,6 +157,7 @@ export function installFont(name, bytes) {
   if (!key.endsWith('.shx')) return null;
   const font = parseShx(bytes);
   fontLib.set(key, font);
+  fontGen++;
   return font;
 }
 
@@ -344,7 +347,7 @@ function interpret(font, data, stack) {
       case 0x0b: {
         const so = data[++i], eo = data[++i], hr = data[++i], lr = data[++i];
         const flag = s8(data[++i]);
-        const r = (hr * 255 + lr) * scale;
+        const r = (hr * 256 + lr) * scale;
         const n1 = (flag & 0x70) >> 4;
         let n2 = flag & 7; if (n2 === 0) n2 = 8;
         if (eo) n2--;
@@ -427,8 +430,12 @@ function gbkCode(ch) {
   return GBK.get(ch) || 0;
 }
 
+// %%d %%p %%c 在 SHX 形字体里的编号。文字里已换成 Unicode，查字形时要换回去。
+const SHX_SPECIAL = { '\u00b0': 127, '\u00b1': 128, '\u00d8': 129, '\u2300': 129 };
 function pick(ch, shapes, big) {
   const cp = ch.codePointAt(0);
+  const sp = SHX_SPECIAL[ch];
+  if (sp && shapes && shapes.type === 'shapes') { const g = glyphOf(shapes, sp); if (g) return g; }
   if (cp < 128 && shapes) { const g = glyphOf(shapes, cp); if (g) return g; }
   if (big) {
     const gbk = gbkCode(ch);
@@ -479,4 +486,14 @@ export function layoutShx(str, primary, big) {
   }
   if (!(maxY - minY >= up * 0.45)) return null;
   return { lines, width: x, up, down };
+}
+
+// 单线字整行排版。每帧都排一遍会让单线字多的图拖不动，按文字、字体和字体版本缓存。
+export function shxLayout(t) {
+  const str = t.sr || t.s;
+  const c = t._shx;
+  if (c && c.gen === fontGen && c.str === str && c.sf === t.sf && c.bf === t.bf) return c.lay;
+  const lay = layoutShx(str, t.sf && fontLib.get(t.sf), t.bf && fontLib.get(t.bf));
+  t._shx = { gen: fontGen, str, sf: t.sf, bf: t.bf, lay };
+  return lay;
 }

@@ -91,3 +91,76 @@ test('ATTRIB vertical alignment comes from code 74, not the field length in 73',
   const texts = buildScene(doc, { origin: [0, 0] }).spaces[0].texts;
   assert.deepEqual(texts.map(t => [t.s, t.va]), [['A1', 0], ['A2', 2]]);
 });
+
+// ---------- 第二轮 ----------
+import { parseShx, layoutShx, shxLayout, installFont, fontLib } from '../app/renderer/core/shx.js';
+import { cleanText, canvasDash } from '../app/renderer/core/engine.js';
+import { unescapeDxfText } from '../app/renderer/core/textRepair.js';
+import { spaceToDxf } from '../app/renderer/core/scenedxf.js';
+
+function u16(n) { return [n & 255, n >> 8 & 255]; }
+function shapesFont(glyphs) {
+  const entries = [[0, [...'TXT'.split('').map(c => c.charCodeAt(0)), 0, 8, 2, 0, 0].flat()], ...glyphs];
+  const index = [], data = [];
+  for (const [code, bytes] of entries) { index.push(...u16(code), ...u16(bytes.length)); data.push(...bytes); }
+  const header = [...'AutoCAD-86 shapes 1.0\r\n\x1a'].map(c => c.charCodeAt(0));
+  return Uint8Array.from([...header, 0, 0, 0, 0, ...u16(entries.length), ...index, ...data]);
+}
+const GLYPH = [8, 0, 8, 8, 6, 0, 2, 8, 2, -8 & 255, 0]; // 一笔折线，前进 8
+
+test('SHX shape fonts draw the diameter, degree and plus-minus symbols', () => {
+  const font = parseShx(shapesFont([[48, GLYPH], [49, GLYPH], [127, GLYPH], [128, GLYPH], [129, GLYPH]]));
+  const lay = layoutShx(cleanText('%%c100%%d%%p1'), font, null);
+  assert.ok(lay);
+  assert.equal(lay.lines.length, 7); // Ø 1 0 0 ° ± 1 各一笔
+});
+
+test('SHX fractional arc radius uses a 256 high byte', () => {
+  // 0x0b：起点偏移 0、终点偏移 0、半径高字节 1、低字节 0（=256）、从 0° 逆时针两个八分圆
+  const font = parseShx(shapesFont([[65, [1, 0x0b, 0, 0, 1, 0, 0x02, 0]]]));
+  const lay = layoutShx('A', font, null);
+  const xs = lay.lines.flat().filter((_, i) => i % 2 === 0);
+  assert.ok(Math.abs(Math.min(...xs) - (256 * Math.cos(Math.PI / 2) - 256)) < 1e-6);
+});
+
+test('SHX line layout is cached until the text or the font changes', () => {
+  installFont('cachetest.shx', shapesFont([[65, GLYPH]]));
+  const t = { s: 'A', sf: 'cachetest.shx', bf: '' };
+  const a = shxLayout(t);
+  assert.ok(a);
+  assert.equal(shxLayout(t), a);
+  t.s = 'AA';
+  const b = shxLayout(t);
+  assert.notEqual(b, a); assert.equal(b.lines.length, 2);
+  installFont('cachetest.shx', shapesFont([[65, GLYPH]]));
+  assert.notEqual(shxLayout(t), b);
+  fontLib.delete('cachetest.shx');
+});
+
+test('\\M+ escapes decode the double-byte code in their code page', () => {
+  assert.equal(unescapeDxfText('\\M+5C4E3\\M+5BAC3'), '你好');
+  assert.equal(unescapeDxfText('\\M+2A4A4'), '中'); // Big5
+  assert.equal(unescapeDxfText('\\M+14E2D'), '中'); // 解不出时保持旧的写法
+});
+
+test('layout export writes CAD control codes instead of ? for symbols', () => {
+  const doc = empty();
+  doc.entities.push(makeRec('TEXT', [[10, 0], [20, 0], [40, 2.5], [1, '%%c100 30%%d %%p5 m\\U+00B2']]));
+  doc.entities.push(makeRec('TEXT', [[10, 0], [20, 10], [40, 2.5], [1, '%%1328@100']]));
+  const sc = buildScene(doc, { origin: [0, 0] });
+  const out = spaceToDxf(sc, '*MODEL_SPACE');
+  assert.ok(out.includes('\r\n%%c100 30%%d %%p5 m2\r\n'), out);
+  assert.ok(out.includes('\r\n%%1328@100\r\n'));
+});
+
+test('dash patterns keep gaps where the line type puts them', () => {
+  assert.deepEqual(canvasDash([10, -5]), { dash: [10, 5], offset: 0 });
+  // 以空白开头：先空 5 再画 10
+  assert.deepEqual(canvasDash([-5, 10]), { dash: [10, 5], offset: 10 });
+  // 奇数段、首尾都是画：首尾相连成一段，从第一段开头画
+  assert.deepEqual(canvasDash([10, -5, 2]), { dash: [12, 5], offset: 2 });
+  // 相邻同号合并
+  assert.deepEqual(canvasDash([10, 3, -5, -1]), { dash: [13, 6], offset: 0 });
+  // 只有画的段是实线
+  assert.deepEqual(canvasDash([4, 4]), { dash: [], offset: 0 });
+});

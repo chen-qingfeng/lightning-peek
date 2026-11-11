@@ -616,11 +616,34 @@ function dashFor(ctx, st, m) {
   const lt = ctx.doc.ltypes.get(st.ltype);
   if (!lt || lt.dashes.length < 2) return null;
   const sc = ctx.ltscale * (st.lts || 1) * Math.sqrt(Math.abs(det(m))) ;
-  const d = lt.dashes.map(x => Math.max(Math.abs(x) * sc, 0)).map((x, i) => (x === 0 ? sc * 0.05 : x));
-  if (d.reduce((a, b) => a + b, 0) <= 0) return null;
+  // 保留正负：正数是画的段，负数是空白，0 是点（画一小段）。转成画布的线段/空白交替由渲染器做。
+  const d = lt.dashes.map(x => (x === 0 ? sc * 0.05 : x * sc));
+  if (!d.some(x => x > 0) || d.reduce((a, b) => a + Math.abs(b), 0) <= 0) return null;
   return d;
 }
 
+// 线型（正数画、负数空）→ 画布的「画、空」交替数组和起始偏移。
+// 相邻同号的段合并；以空白开头的线型从第一段画线开始排，再用偏移把开头的空白补回来。
+export function canvasDash(signed) {
+  const runs = [];
+  for (const x of signed) {
+    const on = x > 0, len = Math.abs(x);
+    if (runs.length && runs[runs.length - 1].on === on) runs[runs.length - 1].len += len;
+    else runs.push({ on, len });
+  }
+  let lead = 0;
+  while (runs.length && !runs[0].on) { const r = runs.shift(); lead += r.len; runs.push(r); }
+  // 首尾同号（都是画）时合并成一段，保持偶数长度
+  if (runs.length > 1 && runs[runs.length - 1].on === runs[0].on) { const r = runs.pop(); runs[0].len += r.len; lead -= r.len; }
+  // 合并后可能还剩连续同号（例如末尾的空白挪到后面后和原来末尾的空白相邻）
+  const merged = [];
+  for (const r of runs) { if (merged.length && merged[merged.length - 1].on === r.on) merged[merged.length - 1].len += r.len; else merged.push({ ...r }); }
+  if (merged.length === 1) return { dash: [], offset: 0 }; // 只有画的段：实线
+  const dash = merged.map(r => r.len);
+  const total = dash.reduce((a, b) => a + b, 0);
+  const offset = lead > 0 ? total - lead : -lead;
+  return { dash, offset: ((offset % total) + total) % total };
+}
 function walk(ctx, ents, m, inh) {
   for (let i = 0; i < ents.length; i++) {
     const r = ents[i];

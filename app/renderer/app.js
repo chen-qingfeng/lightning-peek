@@ -225,14 +225,21 @@ async function openFileObj(f) {
   if (p) return openPath(p);
   return openBytes(f.name, new Uint8Array(await f.arrayBuffer()), null);
 }
+// 正在打开的图纸：同一个文件快速打开两次（双击两下、拖进来又从资源管理器打开）只开一个标签
+const opening = new Map();
 async function openPath(p) {
   const exist = state.docs.find(d => d.path === p && d.kind === 'drawing');
   if (exist) { activate(exist); return exist; }
-  busy(tr('正在读取文件…'));
-  try {
-    const bytes = await B.readFile(p);
-    return await openBytes(p.split(/[\\/]/).pop(), bytes, p);
-  } catch (err) { busy(); toast(tr('打开失败：') + err.message); }
+  if (opening.has(p)) return opening.get(p);
+  const job = (async () => {
+    busy(tr('正在读取文件…'));
+    try {
+      const bytes = await B.readFile(p);
+      return await openBytes(p.split(/[\\/]/).pop(), bytes, p);
+    } catch (err) { busy(); toast(tr('打开失败：') + err.message); }
+  })();
+  opening.set(p, job);
+  try { return await job; } finally { opening.delete(p); }
 }
 async function openBytes(name, bytes, path, opt = {}) {
   if (!/\.(dwg|dxf)$/i.test(name)) { toast(tr('只支持 DWG / DXF 图纸')); return; }
@@ -2038,7 +2045,7 @@ function findPanel(body, d) {
     if (res.length) out.append(h('div', { cls: 'row', style: 'margin-bottom:6px' }, h('button', { cls: 'btn', text: tr('导出查找结果'), onclick: () => {
       const rows = [[tr('序号'), tr('文字'), tr('所在空间'), tr('图层'), 'X', 'Y']];
       res.forEach((r, i) => { const o = r.sp.origin || [0, 0]; rows.push([i + 1, r.t.s, spName(r.sp), r.t.layer, +(r.t.x + o[0]).toFixed(3), +(r.t.y + o[1]).toFixed(3)]); });
-      saveBytes(baseName(d) + tr('_查找_') + q + '.xlsx', makeXlsx([{ name: tr('查找结果'), rows, widths: [6, 50, 10, 16, 14, 14] }]));
+      saveBytes(baseName(d) + tr('_查找_') + safeName(q) + '.xlsx', makeXlsx([{ name: tr('查找结果'), rows, widths: [6, 50, 10, 16, 14, 14] }]));
     } })));
     for (const r of res.slice(0, 600)) {
       const i = r.t.s.toLowerCase().indexOf(ql);

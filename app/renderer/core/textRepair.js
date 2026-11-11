@@ -5,13 +5,28 @@
 // 3) 连续的 ◇ 或 U+FFFD 视为丢字，交给界面提示。
 // 重解只在结果明显更好时替换，避免改掉 café、résumé 这类本来就正确的西文。
 
-/** \U+4E2D、\M+14E2D → 实际字符。\M+ 的第一位是代码页号，后四位是字符码。 */
+// \M+ 的代码页号：1 日文、2 繁体、3 韩文、4 韩文 Johab、5 简体
+const MIF = { 1: 'shift_jis', 2: 'big5', 3: 'euc-kr', 5: 'gbk' };
+const MIF_DEC = new Map();
+function mifChar(n, hex) {
+  const enc = MIF[n];
+  if (enc) {
+    try {
+      let d = MIF_DEC.get(enc); if (!d) { d = new TextDecoder(enc, { fatal: true }); MIF_DEC.set(enc, d); }
+      const v = parseInt(hex, 16);
+      const ch = d.decode(new Uint8Array([v >> 8, v & 255]));
+      if (ch.length === 1) return ch;
+    } catch (e) { /* 不是这个代码页里的字 */ }
+  }
+  return String.fromCharCode(parseInt(hex, 16));
+}
+/** \U+4E2D → 中；\M+5D6D0 → 中。\M+ 的第一位是代码页号，后四位是这个代码页里的双字节编码，不是 Unicode。 */
 export function unescapeDxfText(s) {
   if (!s) return s;
   return s
     .replace(/\\U\+([0-9A-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
     .replace(/\\u\+([0-9A-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-    .replace(/\\M\+[0-9A-Fa-f]([0-9A-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    .replace(/\\M\+([0-9A-Fa-f])([0-9A-Fa-f]{4})/g, (_, n, hex) => mifChar(n, hex));
 }
 
 // windows-1252 把 0x80–0x9F 显示成这些符号；还原字节时要映射回去。

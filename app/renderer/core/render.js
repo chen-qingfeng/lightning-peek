@@ -1,6 +1,6 @@
 // 闪电看图 · Canvas 渲染器
-import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes, clampRun, runLimit } from './engine.js';
-import { fontLib, layoutShx } from './shx.js';
+import { OP, FG, FONT_FAMILIES, BAR_ADV, barStrokes, clampRun, runLimit, canvasDash } from './engine.js';
+import { shxLayout } from './shx.js';
 
 export function buildPath(ops) {
   const p = new Path2D();
@@ -128,12 +128,14 @@ export class Renderer {
       if (!B.path) B.path = buildPath(b.ops);
       ctx.strokeStyle = this.colorOf(b.color, over);
       if (b.w < 0) { ctx.lineWidth = 3 * px / s; ctx.lineCap = 'round'; }
-      else { ctx.lineWidth = Math.max(b.w, px / s); ctx.lineCap = b.w > 0 ? 'square' : 'butt'; }
+      else { ctx.lineWidth = Math.max(b.w, px / s); ctx.lineCap = 'butt'; } // CAD 的宽多段线是平头，不向两端外伸
       if (b.dash && opt.dash !== false) {
-        const minD = Math.min(...b.dash) * s;
-        const total = b.dash.reduce((a, x) => a + x, 0) * s;
-        ctx.setLineDash(total > 6 * dpr && minD > 0.6 ? b.dash : []);
+        const minD = Math.min(...b.dash.map(Math.abs)) * s;
+        const total = b.dash.reduce((a, x) => a + Math.abs(x), 0) * s;
+        if (total > 6 * dpr && minD > 0.6) { const d = canvasDash(b.dash); ctx.setLineDash(d.dash); ctx.lineDashOffset = d.offset; }
+        else ctx.setLineDash([]);
       } else ctx.setLineDash([]);
+      if (!b.dash) ctx.lineDashOffset = 0;
       ctx.stroke(B.path);
     }
     ctx.setLineDash([]);
@@ -254,7 +256,7 @@ export class Renderer {
 
   // 用 SHX 单线字画。字体还没载入、或大部分字不在字体里时返回 false，改画系统字体。
   strokeShx(ctx, t, M, opt) {
-    const lay = layoutShx(t.sr || t.s, t.sf && fontLib.get(t.sf), t.bf && fontLib.get(t.bf));
+    const lay = shxLayout(t);
     if (!lay || !(lay.width > 0)) return false;
     const mx = t.mx || 1, my = t.my || 1;
     let sx = (t.h / lay.up) * (t.wf || 1) * mx;

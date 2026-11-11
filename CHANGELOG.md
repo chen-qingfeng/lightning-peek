@@ -12,6 +12,15 @@ All notable changes are listed here. Versions follow [Semantic Versioning](https
 - The one-step smaller display height stays proportional below 2: 1 draws as 0.75, not 0.5. 3.5, 3 and 2 still draw as 3, 2.5 and 1.5.
 - An attribute's vertical alignment is read from its own field. The field length is no longer taken as the alignment.
 - The app page can no longer change the converter path or the font folders through settings, and it reads only the notes file next to a drawing or a file chosen in the import dialog.
+- Text drawn with an SHX font shows the diameter, degree and plus-minus signs. Before, %%c100 showed as 100.
+- \M+ escaped text in older drawings is decoded in its code page, so Chinese characters no longer turn into Korean syllables.
+- SHX text keeps its line layout between frames, so drawings with a lot of single-line text pan and zoom faster.
+- Layout to model writes diameter, degree, plus-minus and rebar symbols as CAD codes instead of question marks.
+- Wide polylines end flat at their end points, as in CAD, instead of extending by half their width.
+- SHX fractional arcs with a radius above 255 use the right radius.
+- Exported search results get a valid file name even when the search text has characters such as / or ?.
+- Opening the same drawing twice in quick succession opens one tab.
+- Line types that start with a gap or have an odd number of segments draw their dashes in the right places.
 
 ## [0.2.19] – Preview – 2026-11-11
 
