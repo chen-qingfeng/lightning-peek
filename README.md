@@ -9,7 +9,7 @@
   <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
-<p align="center"><b>Current version: v0.2.20 preview</b></p>
+<p align="center"><b>Current version: v0.2.21 preview</b></p>
 
 Built for people on construction, civil, steel and heritage projects — site engineers, quantity surveyors, document controllers, clients and crews — who open drawings to **look, search, count and check**, not to draft. Lightning Peek opens the drawing without a CAD installation and helps you find, measure and compare what is in it.
 
@@ -97,7 +97,7 @@ Tool shortcuts (default): `1` Length · `2` Polyline · `3` Area · `4` Pick are
 
 | Format | Status |
 | --- | --- |
-| DWG | Read through [LibreDWG](https://www.gnu.org/software/libredwg/). Tested with AutoCAD 2007 format (AC1021) drawings. Other versions depend on LibreDWG and may fail or show missing entities. |
+| DWG | Read through [LibreDWG](https://www.gnu.org/software/libredwg/). AutoCAD 2000–2018 formats (AC1015–AC1032) are supported; 2018–2025 still use AC1032. A few drawings may still fail or miss entities depending on LibreDWG. |
 | DXF (ASCII) | Read directly. Tested with R12 and 2007 DXF, UTF-8 and GBK code pages. |
 | DXF (binary) | Not supported. |
 | Export | PNG, PDF (A3), Excel (measurements, find results, tables, comparison report), DXF (copy with your text edits). DWG cannot be written. |

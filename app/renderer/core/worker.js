@@ -1,6 +1,7 @@
 // 闪电看图 · 后台解析线程
 import { parseDxf, buildScene, decodeDxf, encodeLegacy, SigSink, OP, makeRec, ansiOf, injectVertexBulges } from './engine.js';
 import { extractTch, tchBuild, tchMarkup, orientTch, tchUnsupported } from './tarch.js';
+import { dwgMagicOf, errText, isUsableDxf, verName } from './dwgSupport.js';
 
 let wasm = null;
 let booting = null;
@@ -27,6 +28,7 @@ const docs = new Map();
 
 const wasmTrap = e => /memory access out of bounds|^Aborted\(/.test(String(e && e.message || e));
 function dwgToDxf(m, bytes) {
+  const magic = dwgMagicOf(bytes);
   const inF = '/in_' + Date.now() + '.dwg', outF = inF.replace('.dwg', '.dxf');
   m.FS.writeFile(inF, bytes);
   let dwg = 0;
@@ -34,19 +36,24 @@ function dwgToDxf(m, bytes) {
     const r = m.dwg_read_file(inF);
     const err = r && typeof r.error === 'number' ? r.error : 0;
     dwg = r && r.data || 0;
-    if (err >= 128) throw new Error(errText(err));
-    // 先把 DXF 复制出来。后面读天正、OLE 时若 wasm 越界，普通图元仍然能打开。
-    const rc = m.dwg_write_dxf(inF, outF);
-    if (rc >= 128 || !m.FS.analyzePath(outF).exists) throw new Error(errText(rc || err));
-    const out = new Uint8Array(m.FS.readFile(outF));
+    // 先尽量写出 DXF。LibreDWG 对 2010/2013/2018 常带软错误甚至临界标志，但仍可能得到可用 DXF；
+    // 旧逻辑在 err>=128 时直接抛错，高版本图即使能转也会被误判为「版本过新」。
+    let rc = 0;
+    try {
+      rc = m.dwg_write_dxf(inF, outF);
+    } catch (e) {
+      if (wasmTrap(e)) { wasm = null; throw new Error(errText(err || 2048, magic)); }
+      rc = typeof e === 'number' ? e : (err || 2048);
+    }
+    const out = m.FS.analyzePath(outF).exists ? new Uint8Array(m.FS.readFile(outF)) : null;
+    if (!isUsableDxf(out)) throw new Error(errText(rc || err || 2048, magic));
     let oles = [], tch = null, vertexBulges = null;
-    if (dwg && err < 128) {
+    if (dwg) {
       try { oles = extractOles(m, dwg); } catch (e) { console.warn('OLE', e); if (wasmTrap(e)) wasm = null; }
       // LibreDWG 写 DXF 时常丢掉 VERTEX 组码 42；在 wasm 堆坏掉之前先按句柄取出凸度。
       if (wasm) { try { vertexBulges = extractVertexBulges(m, dwg); } catch (e) { console.warn('VERTEX bulge', e); if (wasmTrap(e)) wasm = null; } }
       // 2000/2004 按字段顺序读。2007 的文字在字符串流里，不能沿用旧顺序。
-      const ver = new TextDecoder('latin1').decode(bytes.subarray(0, 6));
-      const mode = ver === 'AC1015' || ver === 'AC1018' ? 1 : ver === 'AC1021' ? 2 : 0;
+      const mode = magic === 'AC1015' || magic === 'AC1018' ? 1 : magic === 'AC1021' ? 2 : 0;
       if (wasm) { try { tch = extractTch(m, dwg, hex, mode); if (tch && tch.trap) wasm = null; } catch (e) { console.warn('TArch', e); if (wasmTrap(e)) wasm = null; } }
     }
     return { bytes: out, warn: err, oles, tch, vertexBulges };
@@ -162,14 +169,6 @@ function injectTch(doc, tch) {
   return n;
 }
 function tchSkipped(tch) { return tchUnsupported(tch); }
-function errText(code) {
-  if (code & 2048) return '图纸版本过新或不受支持。可以在 CAD 软件里另存为 2007 或更早版本后再打开';
-  if (code & 1024) return '图纸文件损坏或不完整。可以用 CAD 软件的「修复」功能处理后再打开';
-  if (code & 512) return '图纸被加密或格式无法识别。请确认文件是 DWG 格式，加密图纸需先在原软件中解密';
-  if (code & 256) return '无法读取这张图纸，文件可能已损坏。可以用 CAD 软件的「修复」功能处理，或另存为 DXF 后再试';
-  if (code & 128) return '图纸缺少必要数据，无法打开。可以在 CAD 软件里另存一份后再试';
-  console.warn('LibreDWG error code', code); return '图纸无法解析。可以在 CAD 软件里另存为 DXF 后再试，并欢迎反馈这张图纸的情况';
-}
 
 function collect(scene, list = []) {
   for (const s of scene.spaces) {
@@ -217,10 +216,6 @@ function docOf(id) {
   if (!D) return null;
   if (!D.doc) { D.doc = parseDxf(textOf(D)); injectOles(D.doc, D.oles); injectVertexBulges(D.doc, D.vertexBulges); injectTch(D.doc, D.tch); }
   return D.doc;
-}
-function verName(v) {
-  const m = { AC1009: 'R12', AC1012: 'R13', AC1014: 'R14', AC1015: '2000', AC1018: '2004', AC1021: '2007', AC1024: '2010', AC1027: '2013', AC1032: '2018' };
-  return m[v] ? 'AutoCAD ' + m[v] : v;
 }
 
 function modelTexts(doc, origin, codepageDeclared) {

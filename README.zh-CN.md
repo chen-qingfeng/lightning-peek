@@ -9,7 +9,7 @@
   <a href="README.md">English</a> · <b>简体中文</b>
 </p>
 
-<p align="center"><b>当前版本：v0.2.20 预览版</b></p>
+<p align="center"><b>当前版本：v0.2.21 预览版</b></p>
 
 面向建筑、市政、钢构、古建一线的总工、施工员、造价人员、资料员、甲方及班组人员。打开图纸的人，大多不是为了画图，而是为了**看、查、统计、核对**。闪电看图只做这一段：不用安装 CAD，把图纸打开，把里面的东西找出来、量出来、比出来。
 
@@ -102,7 +102,7 @@
 
 | 格式 | 情况 |
 | --- | --- |
-| DWG | 通过 [LibreDWG](https://www.gnu.org/software/libredwg/) 读取。用 AutoCAD 2007 格式（AC1021）的图纸测试过。其他版本取决于 LibreDWG，可能打不开或缺少图元。 |
+| DWG | 通过 [LibreDWG](https://www.gnu.org/software/libredwg/) 读取。支持 AutoCAD 2000–2018 格式（AC1015–AC1032）；2018–2025 另存仍是 AC1032。个别图纸仍可能因 LibreDWG 打不开或缺少图元。 |
 | DXF（文本格式） | 直接读取。测试过 R12 和 2007 版 DXF，UTF-8 与 GBK 编码。 |
 | DXF（二进制） | 不支持。 |
 | 导出 | PNG、PDF（A3）、Excel（测量结果、查找结果、表格、对比报告）、DXF（含文字修改的副本）。不能写 DWG。 |

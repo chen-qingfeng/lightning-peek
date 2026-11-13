@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.21] – Preview – 2026-11-13
+
+### Fixed
+- Newer DWG formats (AutoCAD 2010 / 2013 / 2018+, AC1024–AC1032) are opened when LibreDWG can still write a usable DXF. Soft or critical decode flags no longer block the open if the DXF is present. Error text no longer tells you to down-save to 2007.
+
 ## [0.2.20] – Preview – 2026-11-11
 
 ### Fixed

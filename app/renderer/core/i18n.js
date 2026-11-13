@@ -541,12 +541,15 @@ export const EN = {
  "提示": "Note",
  "测量结果用于快速查看和粗略核量，依赖图纸绘制精度与比例设置，不能替代正式的工程量计算。": "Measurements are for quick checks and rough quantities. They depend on how accurately the drawing was drawn and on the scale setting, and do not replace formal quantity take-off.",
 
- "图纸版本过新或不受支持。可以在 CAD 软件里另存为 2007 或更早版本后再打开": "This drawing version is too new or not supported. Save it as AutoCAD 2007 or earlier in your CAD software and try again.",
+ "图纸版本过新或不受支持。可以在 CAD 软件里另存为 2007 或更早版本后再打开": "This drawing version is too new or not supported. Save it as AutoCAD 2018 (AC1032) or earlier, or as DXF, and try again.",
  "图纸文件损坏或不完整。可以用 CAD 软件的「修复」功能处理后再打开": "The drawing file is damaged or incomplete. Run Recover in your CAD software and try again.",
  "图纸被加密或格式无法识别。请确认文件是 DWG 格式，加密图纸需先在原软件中解密": "The drawing is encrypted or not a recognized DWG file. Check the file type; encrypted drawings must be decrypted in the original software first.",
  "无法读取这张图纸，文件可能已损坏。可以用 CAD 软件的「修复」功能处理，或另存为 DXF 后再试": "This drawing could not be read and may be damaged. Run Recover in your CAD software, or save it as DXF, and try again.",
  "图纸缺少必要数据，无法打开。可以在 CAD 软件里另存一份后再试": "The drawing is missing required data. Save a new copy in your CAD software and try again.",
  "图纸无法解析。可以在 CAD 软件里另存为 DXF 后再试，并欢迎反馈这张图纸的情况": "The drawing could not be read. Save it as DXF in your CAD software and try again, and consider reporting the problem.",
+ "图纸版本不受支持。目前最高可读 AutoCAD 2018 格式（AC1032，2018–2025 另存均为此格式）。可在 CAD 里另存为 2018 或更早的 DWG，或另存为 DXF 后再打开": "This drawing version is not supported. The newest readable DWG is AutoCAD 2018 format (AC1032, also used by 2018–2025). Save as 2018 or earlier DWG, or as DXF, and try again.",
+ "这张图纸无法完整读取，可能已损坏或含无法识别的内容。可在 CAD 里用「修复」后另存为 2018 或更早的 DWG，或另存为 DXF 后再试": "This drawing could not be fully read. It may be damaged or contain unrecognized data. Run Recover and save as 2018 or earlier DWG, or as DXF, and try again.",
+ "图纸格式无法识别或已损坏。请确认是 DWG/DXF 文件；也可以在 CAD 里另存为 2018 或更早的 DWG，或另存为 DXF 后再打开": "The drawing format is unrecognized or damaged. Confirm it is DWG/DXF, or save as 2018 or earlier DWG / DXF and try again.",
  "暂不支持二进制 DXF。请在 CAD 软件里另存为文本格式（ASCII）的 DXF": "Binary DXF is not supported yet. Save the drawing as an ASCII DXF in your CAD software.",
  "批注无法保存到图纸所在的文件夹（可能是只读位置）。本次的测量和批注只在程序打开期间有效，可用「导出标注」另存一份": "Markups could not be saved next to the drawing (the folder may be read-only). They will last only until you close the app; use Export markups to keep a copy.",
  "这张图纸里没有可显示的图元": "This drawing has nothing to display."
