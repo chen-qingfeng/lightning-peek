@@ -4,7 +4,7 @@
 
 ## How files are read
 
-- **DWG** files are converted to DXF in memory by LibreDWG (WebAssembly build from [libredwg-web](https://github.com/mlightcad/libredwg-web), version 0.8.6) and then parsed by Lightning Peek's own DXF reader (`app/renderer/core/engine.js`).
+- **DWG** files are converted to DXF in memory by LibreDWG (WebAssembly build from [libredwg-web](https://github.com/mlightcad/libredwg-web), version 0.8.6) and then parsed by Lightning Peek's own DXF reader (`app/renderer/core/engine.js`). When LibreDWG’s DXF export omits VERTEX bulge (group 42), the viewer reads the bulge from the DWG object by handle and restores it before drawing.
 - **DXF** files (ASCII) are parsed directly. Text encoding: UTF-8 for AutoCAD 2007 and later; for older files the code page declared in `$DWGCODEPAGE` is used (GBK, Big5, Shift_JIS, EUC-KR and Windows-125x are mapped).
 - Binary DXF is not supported.
 
@@ -50,7 +50,7 @@ Opening the 380 KB DWG above took about 1 second in headless Chromium inside a L
 
 ### 读取方式
 
-- **DWG**：先由 LibreDWG（[libredwg-web](https://github.com/mlightcad/libredwg-web) 0.8.6 的 WebAssembly 版本）在内存中转换为 DXF，再由闪电看图自带的 DXF 解析器（`app/renderer/core/engine.js`）处理。
+- **DWG**：先由 LibreDWG（[libredwg-web](https://github.com/mlightcad/libredwg-web) 0.8.6 的 WebAssembly 版本）在内存中转换为 DXF，再由闪电看图自带的 DXF 解析器（`app/renderer/core/engine.js`）处理。若 LibreDWG 写出的 DXF 丢掉了 VERTEX 凸度（组码 42），会按句柄从 DWG 对象读回后再绘制。
 - **DXF（文本格式）**：直接解析。AutoCAD 2007 及以后按 UTF-8 解码；更早的版本按文件头 `$DWGCODEPAGE` 声明的代码页解码（支持 GBK、Big5、Shift_JIS、EUC-KR、Windows-125x）。
 - 不支持二进制 DXF。
 

@@ -2,6 +2,11 @@
 
 All notable changes are listed here. Versions follow [Semantic Versioning](https://semver.org/); 0.x releases are previews.
 
+## [0.2.20] – Preview – 2026-11-11
+
+### Fixed
+- Old 2D polylines keep their bulge arcs after DWG conversion. LibreDWG’s DXF export often drops VERTEX group 42; Lightning Peek reads the bulge from the DWG object by handle and writes it back before drawing.
+
 ## [0.2.19] – Preview – 2026-11-11
 
 ### Fixed

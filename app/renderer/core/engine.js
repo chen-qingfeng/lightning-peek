@@ -214,6 +214,31 @@ export function makeRec(type, pairs, extra) {
   return r;
 }
 
+// 写入或覆盖一条组码（LibreDWG 转 DXF 时可能丢掉 VERTEX 的 42 凸度）
+export function setGroup(r, code, value) {
+  const i = r.idx(code);
+  if (i >= 0) r.v[i] = String(value);
+  else { r.c.push(code); r.v.push(String(value)); }
+}
+
+// bulges: Map<handleUpperHex, number>，按句柄把凸度补回 VERTEX
+export function injectVertexBulges(doc, bulges) {
+  if (!doc || !bulges || !bulges.size) return 0;
+  let n = 0;
+  const patch = ents => {
+    for (const r of ents) {
+      if (r.type !== 'VERTEX') continue;
+      const h = r.s(5).toUpperCase();
+      if (!h || !bulges.has(h)) continue;
+      setGroup(r, 42, bulges.get(h));
+      n++;
+    }
+  };
+  patch(doc.entities);
+  for (const b of doc.blocks.values()) patch(b.ents);
+  return n;
+}
+
 export function parseDxf(text) {
   const { codes, vals, n } = tokenize(text);
   const doc = { header: {}, layers: new Map(), ltypes: new Map(), styles: new Map(), styleHandles: new Map(), blocks: new Map(), blockRecords: new Map(), layerHandles: new Map(), entities: [], layouts: [] };
